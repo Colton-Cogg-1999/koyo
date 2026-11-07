@@ -725,3 +725,55 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
   .app-nav .workspaces { width: 100%; }
   .app-nav .workspaces button { padding-inline: 6px; }
 }
+
+/* A quiet conversation alongside the page. */
+.reader .side { width: clamp(360px, 30vw, 460px); }
+.reader .margin-pane { flex: 1 1 36%; }
+.reader .agent { flex: 1 1 64%; }
+.reader .agent.large { flex: 3 1 82%; }
+.agent .pane-title { padding: 10px 16px; min-height: 46px; border-bottom-color: var(--line-soft); }
+.agent .pane-title h2 { text-transform: none; letter-spacing: .01em; font-size: 15px; color: var(--bright); }
+.agent .pane-tools { gap: 8px; }
+.agent .question-scope { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 16px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
+.agent .question-scope select { border: 0; background: var(--pane); color: var(--dim); padding: 3px 2px; font-size: 12px; max-width: 100%; }
+.agent .question-scope select:focus-visible { outline: 1px solid var(--green); }
+.agent .chat-log { padding: 18px 18px 14px; gap: 20px; scroll-behavior: smooth; }
+.agent .question, .agent .answer, .agent .quoted { font-family: 'Newsreader Variable', Georgia, serif; font-size: 18px; line-height: 1.5; font-weight: 400; }
+.agent .question { align-self: flex-end; max-width: 94%; padding: 10px 14px; background: color-mix(in srgb, var(--green) 8%, var(--pane)); border-radius: 4px; color: var(--bright); }
+.agent .answer { color: var(--fg); overflow-wrap: anywhere; }
+.agent .answer .markdown p { margin-bottom: .8em; }
+.agent .answer .markdown p:last-child { margin-bottom: 0; }
+.agent .answer .save { display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; color: var(--dim); font: 10px var(--mono); opacity: .65; }
+.agent .answer .save:hover, .agent .answer .save:focus-visible { opacity: 1; color: var(--green); }
+.agent .cite { color: var(--green); font: 11px var(--mono); vertical-align: .2em; padding: 1px 2px; }
+.agent .cite:hover { background: var(--pane-2); color: var(--bright); }
+.agent .chat-empty { margin: auto 0; padding: 16px 8px; color: var(--dim); }
+.agent .chat-empty p { font-family: 'Newsreader Variable', Georgia, serif; font-size: 21px; line-height: 1.4; color: var(--fg); margin-bottom: 8px; }
+.agent .chat-empty span { font-size: 11px; line-height: 1.6; }
+.agent .chat-empty .ghost { margin-top: 8px; }
+.agent .thinking { font-size: 11px; padding: 4px 0; }
+.agent .quoted { margin: 4px 16px 0; padding: 9px 12px; border: 1px solid var(--line-soft); border-left: 2px solid var(--green); border-radius: 4px; font-size: 16px; line-height: 1.4; background: var(--pane-2); }
+.agent .quoted .icon { flex: none; }
+.agent .ask { margin: 12px 16px 16px; padding: 10px 10px 10px 12px; gap: 10px; border-color: var(--line); border-radius: 4px; background: var(--pane); align-items: flex-end; }
+.agent .ask:focus-within { border-color: color-mix(in srgb, var(--green) 60%, var(--line)); }
+.agent .ask textarea { font: 12px/1.6 var(--mono); max-height: 130px; caret-shape: auto; }
+.agent .ask textarea::placeholder { color: var(--dim); opacity: .8; }
+.chat-send { display: grid; place-items: center; flex: none; width: 32px; height: 32px; background: color-mix(in srgb, var(--green) 80%, var(--pane)); color: var(--bg); border-radius: 3px; }
+.chat-send:disabled { background: var(--pane-2); color: var(--dim); opacity: .6; }
+.agent .chat-options { top: 48px; right: 12px; width: min(300px, calc(100% - 24px)); max-height: calc(100% - 64px); padding: 12px; border-color: var(--line); box-shadow: 0 8px 24px #0005; }
+.chat-options-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.chat-options > .ghost { display: block; margin: 8px 0; }
+.conversation-picker { display: grid; gap: 6px; margin: 12px 0; color: var(--dim); font-size: 11px; }
+.conversation-picker select { width: 100%; }
+.chat-options section { padding: 6px 0; border-top: 1px solid var(--line-soft); }
+.chat-options section button { padding: 6px; font-size: 12px; }
+.chat-disclosure { padding-top: 10px; font-size: 11px; line-height: 1.6; color: var(--dim); }
+@media (max-width: 1040px) {
+  .reader .side { width: min(420px, calc(100vw - 20px)); }
+  .reader .agent .pane-title h2 { flex-basis: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent .chat-log { scroll-behavior: auto; }
+}
+.agent .ask textarea:focus-visible { outline: none; }
+.agent .quoted span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }

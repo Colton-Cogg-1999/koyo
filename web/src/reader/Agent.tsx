@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { ArrowUp, BookmarkPlus, MessageSquarePlus, MoreVertical, Square, X } from 'lucide-react';
 import { api, ask, type AskBody } from '../api';
 import { renderMarkdown } from '../markdown';
 import type { Location } from '../session';
@@ -18,7 +18,6 @@ function Answer({ message, go, onSave }: { message: Message; go: (block: number)
   const byNumber = useMemo(() => new Map<string, Citation>(message.citations.map((c) => [String(c.n), c])), [message.citations]);
   return (
     <div className="answer">
-      <span className="who">OMA:</span>
       <div
         className="markdown"
         dangerouslySetInnerHTML={{ __html: html }}
@@ -33,8 +32,8 @@ function Answer({ message, go, onSave }: { message: Message; go: (block: number)
           if (target && citation) target.title = `${citation.chapter}: ${citation.quote}`;
         }}
       />
-      {message.error && <p className="error">ERR&gt; {message.error}</p>}
-      {message.content && <button className="save" onClick={onSave}>[save to notebook]</button>}
+      {message.error && <p className="error" role="alert">{message.error}</p>}
+      {message.content && <button className="save" title="Save answer to notebook" onClick={onSave}><BookmarkPlus size={13} /> Save to notebook</button>}
     </div>
   );
 }
@@ -57,6 +56,21 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
   const log = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const handled = useRef(0);
+  const options = useRef<HTMLDivElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (event: PointerEvent) => {
+      if (!options.current?.contains(event.target as Node) && !menuButton.current?.contains(event.target as Node)) setMenu(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMenu(false); menuButton.current?.focus(); }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', escape); };
+  }, [menu]);
 
   useEffect(() => {
     api.chats(book.id).then((list) => {
@@ -76,7 +90,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'i' && !(event.target as HTMLElement).closest('input,textarea') && !event.ctrlKey && !event.metaKey) {
+      if (event.key === 'i' && !(event.target as HTMLElement).closest('input,textarea,select') && !event.ctrlKey && !event.metaKey) {
         event.preventDefault();
         field.current?.focus();
       }
@@ -127,6 +141,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
   };
 
   const submit = () => {
+    if (busy) return;
     const text = input.trim();
     if (text === '/new' || text === '/clear') {
       setInput('');
@@ -157,7 +172,6 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
     }
   }, [seed]);
 
-  const selected = providers?.providers.find((p) => p.id === providers.selected) ?? null;
   const usable = providers?.providers.filter((p) => p.signed_in) ?? [];
 
   const pick = async (id: string, model = '') => {
@@ -181,68 +195,64 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
   return (
     <Pane
       className={`agent ${large ? 'large' : ''}`}
-      title={<>AI AGENT <i>// {selected?.name ?? 'offline'}</i></>}
+      title="Ask this book"
       tools={
         <>
-          <button className="tab" onClick={() => setMenu(!menu)}>model</button>
-          {chats.length > 1 && (
-            <select disabled={busy} aria-label="Conversation" value={chat ?? ''} onChange={(event) => setChat(event.target.value)}>
-              {chats.map((c) => <option key={c.id} value={c.id}>{c.title || 'new'}</option>)}
-            </select>
-          )}
-          <button className="icon" title="Resize" onClick={() => setLarge(!large)}>{large ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
+          <button className="icon" title="New conversation" aria-label="New conversation" disabled={busy} onClick={() => { setChat(null); setMessages([]); setInput(''); field.current?.focus(); }}><MessageSquarePlus size={16} /></button>
+          <button ref={menuButton} className={`icon ${menu ? 'on' : ''}`} title="Chat options" aria-label="Chat options" aria-expanded={menu} aria-controls="chat-options" onClick={() => setMenu(!menu)}><MoreVertical size={17} /></button>
         </>
       }
     >
       {menu && (
-        <div className="popover provider-menu">
+        <div ref={options} id="chat-options" className="popover provider-menu chat-options" role="dialog" aria-label="Chat options">
+          <div className="chat-options-heading"><span>Chat options</span><button className="icon" aria-label="Close chat options" onClick={() => setMenu(false)}><X size={14} /></button></div>
+          <button className="ghost" onClick={() => { setLarge(!large); setMenu(false); }}>{large ? 'Restore panel size' : 'Expand conversation'}</button>
+          {chats.length > 0 && <label className="conversation-picker">Conversations
+            <select disabled={busy} aria-label="Conversation" value={chat ?? ''} onChange={(event) => { setChat(event.target.value || null); setMenu(false); }}>
+              <option value="">New conversation</option>
+              {chats.map((c) => <option key={c.id} value={c.id}>{c.title || 'Untitled conversation'}</option>)}
+            </select>
+          </label>}
           {providers?.providers.map((p) => (
             <section key={p.id}>
-              <h4>{p.name}{p.plan ? ` [${p.plan}]` : ''}</h4>
+              <h4>{p.name}{p.plan ? ` · ${p.plan}` : ''}</h4>
               {p.signed_in ? p.models.map((m) => (
-                <button key={m.id} className={p.id === providers.selected && m.id === providers.model ? 'on' : ''} onClick={() => void pick(p.id, m.id).catch(failure)}>{m.label}</button>
+                <button key={m.id} disabled={busy} className={p.id === providers.selected && m.id === providers.model ? 'on' : ''} onClick={() => void pick(p.id, m.id).catch(failure)}>{m.label}</button>
               )) : <p className="hint">{p.help}</p>}
             </section>
           ))}
+          <button className="ghost" onClick={() => void api.providers(true).then(setProviders).catch(failure)}>Refresh providers</button>
+          <p className="chat-disclosure">Your question and source excerpts go to the selected provider. Check citations against the book; answers can be wrong.</p>
         </div>
       )}
       <div className="question-scope">
-        <label>Ask about
-          <select aria-label="Question scope" disabled={busy} value={scope} onChange={(event) => setScope(event.target.value as AskBody['scope'])}>
-            {location && <option value="page">{book.format === 'pdf' ? `Current page (${location.page})` : 'Visible passages'}</option>}
-            {selection && <option value="selection">Selected text</option>}
-            <option value="chapter">A chapter</option>
-            <option value="search">Search this book</option>
-            <option value="book">Book overview (sampled)</option>
-          </select>
-        </label>
+        <select aria-label="Question scope" title="Choose what to ask about" disabled={busy} value={scope} onChange={(event) => setScope(event.target.value as AskBody['scope'])}>
+          {location && <option value="page">{book.format === 'pdf' ? `This page · ${location.page}` : 'Visible passages'}</option>}
+          {selection && <option value="selection">Selected text</option>}
+          <option value="chapter">This chapter</option>
+          <option value="search">Search this book</option>
+          <option value="book">Book overview (sampled)</option>
+        </select>
         {scope === 'chapter' && <select aria-label="Question chapter" disabled={busy} value={chapter} onChange={(event) => setChapter(event.target.value)}>
           <option value="current">{location ? 'Current chapter' : 'First chapter'}</option>
           {book.chapters.map((c) => <option key={c.idx} value={c.idx}>{c.title}</option>)}
         </select>}
-        <span className="hint">Answers use excerpts from {book.title}. Follow citations to check them.</span>
-        <button className="tab" disabled={busy} onClick={() => { setChat(null); setMessages([]); }}>New conversation</button>
       </div>
       <div className="chat-log" ref={log}>
         {providers && usable.length === 0 && (
-          <div className="answer">
-            <span className="who">SYS:</span>
-            <p>no signed-in agent found. oma uses your own CLI subscription.</p>
-            {providers.providers.map((p) => <p key={p.id} className="hint">{p.name}: {p.help}</p>)}
-            <button className="save" onClick={() => void api.providers(true).then(setProviders).catch(failure)}>[check again]</button>
-          </div>
+          <div className="chat-empty"><p>Connect a provider to ask about your book.</p><button className="ghost" onClick={() => setMenu(true)}>Choose a provider</button></div>
         )}
         {usable.length > 0 && messages.length === 0 && (
-          <div className="answer"><span className="who">OMA:</span> <p className="inline">&gt;&gt;&gt; ready. ask about this book, or try /summarize, /ideas, /quiz.</p></div>
+          <div className="chat-empty"><p>What would you like to understand?</p><span>A passage, a chapter, or a question worth following.</span></div>
         )}
         {messages.map((message, i) => (
           message.role === 'user'
-            ? <div key={i} className="question"><span>USER_&gt;</span> {message.content}</div>
+            ? <div key={i} className="question" aria-label="Your question">{message.content}</div>
             : message.content || message.error
               ? <Answer key={i} message={message} go={go} onSave={() => void saveNote(message).catch(failure)} />
               : null
         ))}
-        {busy && messages.at(-1)?.content === '' && <div className="thinking">&gt;&gt;&gt; reading<span className="cursor" /></div>}
+        {busy && messages.at(-1)?.content === '' && <div className="thinking" role="status">Reading the passages…</div>}
       </div>
       {suggestions.length > 0 && (
         <div className="suggest">
@@ -254,15 +264,15 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
         </div>
       )}
       {selection && scope === 'selection' && (
-        <div className="quoted"><span>"{selection.selection.slice(0, 130)}{selection.selection.length > 130 ? '…' : ''}"</span><button className="icon" title="Remove" onClick={() => { setSelection(null); if (scope === 'selection') setScope(location ? 'page' : 'search'); }}>×</button></div>
+        <div className="quoted"><span title={selection.selection}>“{selection.selection.slice(0, 130)}{selection.selection.length > 130 ? '…' : ''}”</span><button className="icon" title="Remove selected text" aria-label="Remove selected text" onClick={() => { setSelection(null); if (scope === 'selection') setScope(location ? 'page' : 'search'); }}><X size={14} /></button></div>
       )}
       <form className="ask" onSubmit={(event) => { event.preventDefault(); submit(); }}>
-        <span>USER_&gt;</span>
         <textarea
           ref={field}
-          rows={1}
+          rows={2}
+          aria-label="Ask about your book"
           value={input}
-          placeholder="type question or /command"
+          placeholder="Ask about what you’re reading…"
           disabled={usable.length === 0}
           onChange={(event) => setInput(event.target.value)}
           onKeyDown={(event) => {
@@ -273,8 +283,8 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
             if (event.key === 'Escape') field.current?.blur();
           }}
         />
-        {!busy && <button type="submit" className="tab" disabled={!input.trim() || usable.length === 0}>Ask</button>}
-        {busy && <button type="button" className="tab" title="Stop" onClick={() => abort.current?.abort()}>^C</button>}
+        {!busy && <button type="submit" className="chat-send" title="Send question" aria-label="Send question" disabled={!input.trim() || usable.length === 0}><ArrowUp size={18} /></button>}
+        {busy && <button type="button" className="chat-send" title="Stop response" aria-label="Stop response" onClick={() => abort.current?.abort()}><Square size={14} /></button>}
       </form>
     </Pane>
   );
