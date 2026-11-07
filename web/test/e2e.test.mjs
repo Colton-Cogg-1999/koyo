@@ -264,6 +264,32 @@ test('real Kokoro narration and M4B export', { skip: !process.env.OMAREADER_TEST
   const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', file], { encoding: 'utf8' });
   assert.equal(probe.status, 0, probe.stderr);
   assert.ok(Number(JSON.parse(probe.stdout).format.duration) > 1);
+  const volume = spawnSync('ffmpeg', ['-i', file, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' });
+  assert.equal(volume.status, 0);
+  assert.doesNotMatch(volume.stderr, /mean_volume: -inf/);
+  assert.match(volume.stderr, /mean_volume: -?[0-9.]+ dB/);
+  writeFileSync(join(data, 'listening.md'), '# A longer reading session\n\n' + Array.from({ length: 24 }, (_, i) => `Paragraph ${i+1}. A reader can pause, think, and return to the same place. In 2026, the library held 42 books, each with room for notes.`).join('\n\n'));
+  const longBook = await upload('listening.md');
+  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
+  const paused = await api(`/api/books/${longBook}/audio/pause`, 'POST');
+  assert.equal(paused.status, 'paused');
+  assert.ok(paused.tracks.length > 1);
+  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
+  await eventually(async () => {
+    const state = await api(`/api/books/${longBook}/audio`);
+    assert.notEqual(state.status, 'failed', state.error);
+    return state.status === 'done';
+  }, 240000);
+  const complete = await api(`/api/books/${longBook}/audio`);
+  assert.ok(complete.tracks.every((track) => track.ready && track.duration_ms > 0));
+  await api(`/api/books/${longBook}/audio/position`, 'PUT', { seq: 1, ms: 1200 });
+  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
+  const resumed = await api(`/api/books/${longBook}/audio`);
+  assert.equal(resumed.status, 'done');
+  assert.equal(resumed.listen_seq, 1);
+  assert.equal(resumed.listen_ms, 1200);
+  assert.deepEqual(resumed.tracks, complete.tracks);
+
 });
 
 test('live AI answers use the selected provider and persist citations', { skip: !process.env.OMAREADER_TEST_AI, timeout: 180000 }, async (t) => {
@@ -361,7 +387,11 @@ test('live AI answers page, selection, and chosen chapter questions from the cor
   const id = await upload('signals.md');
   const providers = (await api('/api/ai/providers')).providers.filter((p) => p.signed_in);
   assert.ok(providers.length, 'Live AI verification requires an authenticated provider');
+  const pdfBook = await upload('mixed-pages.pdf');
+  const pdfBlocks = await api(`/api/books/${pdfBook}/pages/1/blocks`);
   const cases = [
+    { name: 'PDF page', book: pdfBook, body: { scope: 'page', page: 2, question: 'What page number does the text itself say? Answer with the page number and a citation.' }, expected: /2/, forbidden: /page 1/i, block: 0, page: 2 },
+    { name: 'PDF selection', book: pdfBook, body: { scope: 'selection', block: pdfBlocks[0].seq, end_block: pdfBlocks.at(-1).seq, selection: 'Books belong on open shelves.', question: 'Where do books belong according to the selected text? Answer with the location and a citation.' }, expected: /open shelves/i, forbidden: /closed shelves/i, block: 0 },
     { name: 'page', body: { scope: 'page', block: 1, end_block: 1, question: 'What is the access phrase on this page? Give only the phrase and a citation.' }, expected: /copper otter/i, forbidden: /silver badger/i, block: 1 },
     { name: 'selection', body: { scope: 'selection', block: 1, end_block: 1, selection: 'Its keeper is Mara.', question: 'Who is the keeper named in the selected text? Give only the name and a citation.' }, expected: /Mara/, forbidden: /Ivo/, block: 1 },
     { name: 'chosen chapter', body: { scope: 'chapter', chapter: 1, block: 0, question: 'What is the access phrase in this chapter? Give only the phrase and a citation.' }, expected: /silver badger/i, forbidden: /copper otter/i, block: 2 },
@@ -370,7 +400,7 @@ test('live AI answers page, selection, and chosen chapter questions from the cor
   for (const provider of providers) {
     await api('/api/settings', 'PUT', { ai_provider: provider.id, ai_model: '' });
     for (const item of cases) await t.test(`${provider.id}: ${item.name}`, async () => {
-      const chat = await api(`/api/books/${id}/chats`, 'POST');
+      const chat = await api(`/api/books/${item.book ?? id}/chats`, 'POST');
       const response = await fetch(`${ORIGIN}/api/chats/${chat.id}/messages`, { method: 'POST', signal: AbortSignal.timeout(120000),
         headers: { Cookie: `oma_session=${token}`, Origin: ORIGIN, 'Content-Type': 'application/json' }, body: JSON.stringify(item.body) });
       assert.ok(response.ok, await (!response.ok ? response.text() : Promise.resolve('')));
@@ -382,6 +412,7 @@ test('live AI answers page, selection, and chosen chapter questions from the cor
       assert.doesNotMatch(answer.content, item.forbidden);
       assert.ok(answer.citations.length > 0);
       assert.ok(answer.citations.every((c) => c.block >= item.block));
+      if (item.page) assert.ok(answer.citations.every((c) => c.page === item.page));
       if (item.name !== 'unanswerable') {
         const used = [...answer.content.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
         assert.ok(used.length > 0, answer.content);
@@ -480,4 +511,27 @@ test('stale EPUB offsets recover by quote or visibly refuse an unsafe attachment
   assert.ok(!highlights.some((text) => text.includes('This paragraph was replaced')));
   assert.ok((await api(`/api/annotations?book=${epub}`)).some((a) => a.note === 'Reflow must keep this passage.'));
   await page.unroute(`**/api/books/${epub}/sections/*`);
+});
+
+test('portrait layout keeps book actions, reading, and question controls accessible', async () => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto(`${ORIGIN}/#/library`);
+  await page.click('.row[title="Open Shelves"]');
+  assert.ok(await page.locator('button:has-text("Ask this book")').isVisible());
+  await page.click('button:has-text("Ask this book")');
+  await page.waitForSelector('.study .agent');
+  await page.selectOption('[aria-label="Question scope"]', 'chapter');
+  assert.ok(await page.locator('[aria-label="Question chapter"]').isVisible());
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  assert.equal(await page.locator('.side').count(), 0);
+  await page.locator('button[title^="Side panes"]').click();
+  await page.waitForSelector('.side .agent');
+  await page.click('.side-close');
+  assert.equal(await page.locator('.side').count(), 0);
+  await page.click('.mobile-audio');
+  assert.ok(await page.locator('.left .audio').isVisible());
+  await page.click('.mobile-audio');
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.setViewportSize({ width: 1600, height: 900 });
 });
