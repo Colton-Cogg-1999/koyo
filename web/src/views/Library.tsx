@@ -13,7 +13,6 @@ export function Library({ books, collections, filter, onChange, onImport }: {
   onChange: () => void;
   onImport: () => void;
 }) {
-  const [storage] = useAsync(() => api.storage(), []);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const shown = useMemo(() => {
@@ -61,8 +60,8 @@ export function Library({ books, collections, filter, onChange, onImport }: {
     <div className="split">
       <Pane title={<>LIBRARY <i>// {shown.length} {shown.length === 1 ? 'book' : 'books'}</i></>} tools={tabs} className="shelf">
         <div className="library-location">
-          <span>Books are copied to <code>{storage?.books_dir ?? 'your local library'}</code></span>
-          <button className="ghost" onClick={() => void api.openLibraryFolder().catch(failure)}>Open books folder</button>
+          <span title="Importing saves a copy in OmaReader. Moving or deleting the original does not remove it from your library.">Your books · saved on this device</span>
+          <button className="ghost" onClick={() => navigate('settings')}>Manage storage</button>
         </div>
         <div className="shelf-tools">
           <input type="search" aria-label="Filter" placeholder="filter" value={query} onChange={(event) => { setQuery(event.target.value); setCursor(0); }} />
@@ -70,7 +69,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
         </div>
         {shown.length === 0 ? (
           <Empty title={books.length ? 'no matches' : 'library empty'}>
-            {books.length ? 'nothing in this view.' : 'drop an EPUB, PDF, or any document anywhere in this window, or press a.'}
+            {books.length ? 'nothing in this view.' : 'Import an EPUB, PDF, or document to keep it in your library. Drop it here or press a; OmaReader saves its own copy.'}
           </Empty>
         ) : (
           <div className="rows" role="listbox" aria-label="Books">

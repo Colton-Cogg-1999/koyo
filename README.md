@@ -95,7 +95,7 @@ Use **− / percentage / +** in the reader toolbar to zoom. EPUBs enlarge the te
 
 Imported books are copied, so the source files are left alone. The library lives in `$XDG_DATA_HOME/omareader`, or `~/.local/share/omareader` by default. Set `OMAREADER_DATA_DIR` for a different location.
 
-The library screen shows the books folder and lets you open it or export a book's original file. The data directory contains the SQLite database, imported originals, extracted assets, Markdown notes, voice model, and generated audio.
+OmaReader manages a persistent library: import once, then reopen the book from the app whenever you want. Moving or deleting the source file does not remove the imported copy. Export original retrieves it; Manage storage opens the storage details in Settings. The data directory contains the SQLite database, imported originals, extracted assets, Markdown notes, voice model, and generated audio.
 
 Close OmaReader, then make a checked backup into a **new** directory:
 

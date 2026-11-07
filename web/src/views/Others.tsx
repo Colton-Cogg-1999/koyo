@@ -156,8 +156,8 @@ export function Settings() {
         </section>
 
         <section>
-          <h2>STORAGE</h2>
-          <p className="hint">books, notes, audio and search all live on this disk. the original file is copied in on import, so the source can be moved or deleted. close OmaReader before copying the data directory for a complete backup. Do not sync a running database.</p>
+          <h2>LIBRARY STORAGE</h2>
+          <p className="hint">OmaReader keeps its own persistent library on this device. Imported books, notes, highlights, and reading positions remain when you close the app. You can move or delete the original files after importing. Use Export original to take a book back out.</p>
           {storage && (
             <>
               <dl className="paths">
