@@ -2,8 +2,6 @@
 
 **Your books. Your notes. No gatekeeper.**
 
-![OmaReader reading an original sample book, with notes alongside the text](docs/reader.png)
-
 Knowledge should not be a luxury product. You should not need a university login, a monthly subscription, or a company's permission to read a book you already have. You should not lose your notes because a service shuts down or decides you are no longer a customer.
 
 OmaReader is built around a straightforward position: **the reader should be in control.** Open local files. Read offline. Keep notes in a format other tools can understand. Listen without paying a cloud service for every paragraph. Inspect the code, change it, and share what you improve.

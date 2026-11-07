@@ -29,4 +29,4 @@ This review exercised the application rather than treating compilation as proof 
 
 Large-library stress testing, crash recovery during every possible write, all EPUB/CSS variants, every PDF layout, DOCX/FB2/Calibre conversion coverage, and cross-distribution installation testing are not complete. Provider CLI changes can affect AI integrations. No OCR or DRM removal is implemented. Markdown mirroring is one-way; a complete backup includes the database.
 
-Use the README's opt-in commands to reproduce narration and provider checks. Standard CI intentionally does not download voice models or use an AI account. Screenshots show original generated test content.
+Use the README's opt-in commands to reproduce narration and provider checks. Standard CI intentionally does not download voice models or use an AI account. The browser suite uses synthetic test books; its fixture screenshots are not product documentation.
