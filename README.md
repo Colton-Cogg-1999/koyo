@@ -21,7 +21,7 @@ OmaReader is a Linux desktop reader with a Rust backend and a React interface, o
 | Annotations | Colored highlights, bookmarks, passage notes, and a Markdown notebook |
 | Portable notes | SQLite storage plus Markdown mirrors and per-book Markdown downloads |
 | Narration | Local Kokoro speech generation, sentence timing for read-along, resumable tracks, and chaptered M4B export |
-| Optional AI | Questions about retrieved passages through your installed Claude Code or Codex CLI, with links back to the text |
+| Optional AI | Ask from the library, or scope questions to visible passages, selected text, or a chosen chapter; Claude Code or Codex CLI supplies the answers |
 | Appearance | Reading fonts, paper colors, focus mode, and optional live Omarchy theme integration |
 
 There is also import code for DOCX and FB2, and optional conversion through Calibre for formats including MOBI and AZW3. Those paths have less coverage than EPUB and PDF; report files that do not import correctly.
@@ -59,6 +59,16 @@ makepkg -si
 ```
 
 On other Linux distributions, install equivalent build tools and runtime packages, then use `scripts/build`. Chromium, Chrome, Brave, and Edge are detected for app-window mode; `xdg-open` is the fallback. No Omarchy installation is required.
+
+## Ask something useful
+
+Select a book in the library and choose **Ask this book**. You don't have to open it or lose your reading position. Choose **Search this book** for a specific question, or **A chapter** and pick the chapter you mean.
+
+While reading, **Visible passages** uses the paragraphs intersecting the reading viewport; for PDFs, **Current page** uses that PDF page's text layer. Select text and click **Ask Oma** to ask about just that selection. The scope stays visible above the question box. `/summarize` and `/quiz` use the chosen chapter (the current chapter by default); `/ideas` uses a sampled book overview.
+
+Long chapters and book overviews may be sampled. Chapter questions also retrieve matching passages from within that chapter. This isn't a claim that the model has read every word. Answers are instructed to stick to supplied evidence and say when it isn't enough. Follow the numbered citations to check, and save useful answers to your notebook with their source references.
+
+Highlights store text locations rather than screen pixels for EPUBs, and page-relative rectangles for PDFs. EPUB quotation checks catch stale offsets; a unique match can recover a shifted passage. If a safe match isn't possible, the reader tells you instead of highlighting unrelated text. That is not automatic migration between different editions of a book.
 
 ## Keyboard controls
 
@@ -118,7 +128,7 @@ This is a working **0.1 application**, not a claim that every book on earth rend
 - Scanned PDFs can display, but search, selection, and narration need a text layer. OCR is not included.
 - The exposed narration voices and text normalization are English-focused.
 - Complex EPUB styling and unusual document layouts may not survive conversion exactly.
-- No built-in cloud sync, mobile app, or collaborative editing.
+- No built-in cloud sync, native mobile app, podcast generator, or collaborative editing. Portrait layouts are browser-tested; Surface touch/pen and Nook compatibility still need testing on the actual devices.
 - Third-party voice models, fonts, libraries, and provider CLIs retain their own licenses and requirements.
 
 ## Tests that exercise the app
@@ -138,7 +148,7 @@ Optional integration checks use actual external dependencies:
 cd web
 OMAREADER_TEST_TTS=1 npm test
 
-# Sends a short question about a generated test book through each signed-in CLI.
+# Checks page, selection, chapter, PDF, and unanswerable questions through each signed-in CLI.
 # Uses your provider account and its usage allowance.
 OMAREADER_TEST_AI=1 npm test
 ```
