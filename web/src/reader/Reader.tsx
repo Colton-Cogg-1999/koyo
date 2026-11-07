@@ -197,6 +197,13 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
     onJump: (block: number) => go(block, false),
     onHit: (annotation: Annotation, rect: DOMRect) => setEditing({ annotation, rect }) };
   const chapter = chapterTitle(book, location.block);
+  const pdf = book.format === 'pdf';
+  const zoomValue = pdf ? prefs.zoom : prefs.size / defaultPrefs.size;
+  const adjustZoom = (direction: number) => {
+    if (pdf) changePrefs({ zoom: Math.max(0.6, Math.min(2.5, Math.round((prefs.zoom + direction * 0.1) * 100) / 100)) });
+    else changePrefs({ size: Math.max(13, Math.min(40, prefs.size + direction * 2)) });
+    setJump({ block: location.block, page: location.page || undefined, fraction: location.fraction, nonce: ++nonce.current });
+  };
 
   return (
     <div className={`reader ${focus ? 'zen' : ''}`}>
@@ -207,6 +214,11 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
           <>
             <button className="icon" title="Library" onClick={() => navigate('library')}><ArrowLeft size={16} /></button>
             <button className="icon" title="Search (/)" onClick={() => window.dispatchEvent(new CustomEvent('oma-search', { detail: { book: id } }))}><Search size={15} /></button>
+            <div className="reader-zoom" role="group" aria-label="Reading zoom">
+              <button className="icon" title="Zoom out" aria-label="Zoom out" disabled={pdf ? prefs.zoom <= 0.6 : prefs.size <= 13} onClick={() => adjustZoom(-1)}>−</button>
+              <button className="tab" title="Reset zoom" aria-label="Reset zoom" onClick={() => changePrefs(pdf ? { zoom: 1 } : { size: defaultPrefs.size })}>{Math.round(zoomValue * 100)}%</button>
+              <button className="icon" title="Zoom in" aria-label="Zoom in" disabled={pdf ? prefs.zoom >= 2.5 : prefs.size >= 40} onClick={() => adjustZoom(1)}>+</button>
+            </div>
             <button className={`icon ${typeOpen ? 'on' : ''}`} title="Text and page" onClick={() => setTypeOpen(!typeOpen)}><Type size={15} /></button>
             <button className={`icon ${here ? 'on' : ''}`} title="Bookmark (b)" onClick={() => void toggleBookmark().catch(failure)}><Bookmark size={15} fill={here ? 'currentColor' : 'none'} /></button>
             <button className={`icon ${sideOpen ? 'on' : ''}`} title="Side panes (\)" onClick={() => setSideOpen(!sideOpen)}><PanelRight size={15} /></button>
@@ -298,7 +310,7 @@ function TypePanel({ prefs, pdf, onChange, onClose }: { prefs: ReaderPrefs; pdf:
       </div>
       {pdf ? (
         <label>zoom <output>{Math.round(prefs.zoom * 100)}%</output>
-          <input type="range" min={0.6} max={2} step={0.05} value={prefs.zoom} onChange={(event) => onChange({ zoom: Number(event.target.value) })} />
+          <input type="range" min={0.6} max={2.5} step={0.05} value={prefs.zoom} onChange={(event) => onChange({ zoom: Number(event.target.value) })} />
         </label>
       ) : (
         <>
@@ -308,7 +320,7 @@ function TypePanel({ prefs, pdf, onChange, onClose }: { prefs: ReaderPrefs; pdf:
             ))}
           </div>
           <label>size <output>{prefs.size}px</output>
-            <input type="range" min={13} max={28} value={prefs.size} onChange={(event) => onChange({ size: Number(event.target.value) })} />
+            <input type="range" min={13} max={40} value={prefs.size} onChange={(event) => onChange({ size: Number(event.target.value) })} />
           </label>
           <label>leading <output>{prefs.leading.toFixed(2)}</output>
             <input type="range" min={1.3} max={2} step={0.02} value={prefs.leading} onChange={(event) => onChange({ leading: Number(event.target.value) })} />
