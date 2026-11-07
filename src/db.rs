@@ -147,7 +147,7 @@ CREATE TABLE audio_tracks(
   peaks TEXT NOT NULL DEFAULT '[]',
   PRIMARY KEY(book_id, seq)
 ) WITHOUT ROWID;
-"#];
+"#, "ALTER TABLE messages ADD COLUMN context TEXT NOT NULL DEFAULT '{}';"];
 
 #[derive(Clone)]
 pub struct Db(Arc<Mutex<Connection>>);

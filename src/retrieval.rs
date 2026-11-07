@@ -106,11 +106,20 @@ pub fn search(db: &Db, book: Option<&str>, query: &str, limit: u32) -> Result<Ve
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SelectionContext {
+    pub text: String,
+    pub block: u32,
+    pub end_block: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct AskRequest {
     pub question: String,
     #[serde(default)]
     pub selection: Option<String>,
+    #[serde(default)]
+    pub attachment: Option<SelectionContext>,
     /// The block at the top of the reader, used for "this chapter" questions.
     #[serde(default)]
     pub block: Option<u32>,
@@ -137,6 +146,7 @@ pub struct Citation {
 }
 
 pub struct Prompt {
+    pub partial: bool,
     pub system: String,
     pub prompt: String,
     pub citations: Vec<Citation>,
@@ -160,14 +170,16 @@ struct Builder {
     chapters: Vec<Chapter>,
     citations: Vec<Citation>,
     sources: String,
+    truncated: bool,
 }
 
 impl Builder {
     fn add(&mut self, block: u32, page: u32, text: &str) {
         let remaining = CHAPTER_BUDGET.saturating_sub(self.sources.len());
-        if remaining < 256 { return; }
+        if remaining < 256 { self.truncated = true; return; }
         let mut end = text.len().min(remaining - 256);
         while !text.is_char_boundary(end) { end -= 1; }
+        self.truncated |= end < text.len();
         let text = &text[..end];
         if text.trim().is_empty() { return; }
         let n = self.citations.len() + 1;
@@ -203,11 +215,12 @@ impl Builder {
 const CHAPTER_BUDGET: usize = 60_000;
 const SEARCH_PASSAGES: usize = 16;
 
-fn sampled(rows: Vec<Row>, budget: usize) -> Vec<Row> {
+fn sampled(rows: Vec<Row>, budget: usize, partial: &mut bool) -> Vec<Row> {
     let total: usize = rows.iter().map(|r| r.text.len()).sum();
     if total <= budget {
         return rows;
     }
+    *partial = true;
     if budget == 0 || rows.is_empty() { return Vec::new(); }
     // Evenly distributed excerpts, with a hard UTF-8-safe byte budget. A single
     // enormous paragraph must not disappear or consume the entire context window.
@@ -268,7 +281,8 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
     let (title, author): (String, String) =
         conn.query_row("SELECT title,author FROM books WHERE id=?1", [book], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let chapter_list = chapters(&conn, book)?;
-    let mut b = Builder { chapters: chapter_list.clone(), citations: Vec::new(), sources: String::new() };
+    let mut b = Builder { chapters: chapter_list.clone(), citations: Vec::new(), sources: String::new(), truncated: false };
+    let mut partial = false;
     let current = if let Some(idx) = request.chapter {
         Some(chapter_list.iter().find(|c| c.idx == idx).context("That chapter does not exist.")?.clone())
     } else {
@@ -277,6 +291,15 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
     let scope = request.scope.as_deref().unwrap_or("search");
     if !matches!(scope, "page" | "selection" | "chapter" | "book" | "search") {
         bail!("Unknown question scope.");
+    }
+
+    if let Some(attachment) = &request.attachment {
+        if attachment.end_block < attachment.block || attachment.text.trim().is_empty() { bail!("Invalid attached passage."); }
+        let rows = range(&conn, book, attachment.block, attachment.end_block.saturating_add(1))?;
+        let source = rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>().join(" ");
+        let normalized = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !normalized(&source).contains(&normalized(&attachment.text)) { bail!("The attached passage no longer matches this book."); }
+        b.add(attachment.block, rows.first().map(|r| r.page).unwrap_or(0), &attachment.text);
     }
 
     match scope {
@@ -291,7 +314,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
                 if end < start { bail!("Invalid visible passage range."); }
                 range(&conn, book, start, end.saturating_add(1))?
             };
-            b.add_rows(&sampled(rows, CHAPTER_BUDGET), 1400);
+            b.add_rows(&sampled(rows, CHAPTER_BUDGET, &mut partial), 1400);
         }
         "selection" => {
             let selected = request.selection.as_deref().filter(|s| !s.trim().is_empty()).context("Select a passage first.")?;
@@ -310,7 +333,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
             let chapter = current.as_ref().context("Choose a chapter first.")?;
             {
                 add_search_hits(&mut b, &conn, book, &request.question, Some((chapter.start, chapter.end)))?;
-                let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, CHAPTER_BUDGET);
+                let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, CHAPTER_BUDGET, &mut partial);
                 b.add_rows(&rows, 1400);
             }
         }
@@ -318,11 +341,12 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
             let spoken: Vec<&Chapter> = chapter_list.iter().filter(|c| !c.front).collect();
             let per_chapter = (CHAPTER_BUDGET / spoken.len().max(1)).min(6000);
             for chapter in spoken {
-                let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, per_chapter);
+                let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, per_chapter, &mut partial);
                 b.add_rows(&rows, 1400);
             }
         }
         _ => {
+            partial = true;
             if let Some(block) = request.block {
                 let rows = range(&conn, book, block.saturating_sub(2), block + 10)?;
                 b.add_rows(&rows, 1400);
@@ -362,5 +386,5 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
         }
     }
     prompt.push_str(&format!("Reader's question: {}", request.question));
-    Ok(Prompt { system: system_prompt(), prompt, citations: b.citations })
+    Ok(Prompt { partial: partial || b.truncated, system: system_prompt(), prompt, citations: b.citations })
 }

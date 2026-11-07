@@ -51,11 +51,12 @@ async fn create_chat(State(state): State<AppState>, Path(book): Path<String>) ->
 
 async fn messages(State(state): State<AppState>, Path(chat): Path<String>) -> ApiResult {
     let conn = state.db.conn();
-    let list = rows(&conn, "SELECT id,role,content,citations,provider,created_at FROM messages WHERE chat_id=?1 ORDER BY id", [chat])?;
+    let list = rows(&conn, "SELECT id,role,content,citations,provider,created_at,context FROM messages WHERE chat_id=?1 ORDER BY id", [chat])?;
     let parsed = list
         .into_iter()
         .map(|mut message| {
             let citations = message["citations"].as_str().and_then(|c| serde_json::from_str(c).ok()).unwrap_or(json!([]));
+            message["context"] = message["context"].as_str().and_then(|c| serde_json::from_str(c).ok()).unwrap_or(json!({}));
             message["citations"] = citations;
             message
         })
@@ -104,11 +105,12 @@ async fn ask(State(state): State<AppState>, Path(chat): Path<String>, Json(body)
     let model = state.db.setting_str("ai_model");
     let prompt = retrieval::build(&state.db, &book, &body.request, &history).map_err(|e| bad_request(&e.to_string()))?;
     let citations = prompt.citations.clone();
+    let context = json!({"scope": body.request.scope, "block": body.request.block, "end_block": body.request.end_block, "page": body.request.page, "chapter": body.request.chapter, "selection": body.request.selection, "attachment": body.request.attachment, "partial": prompt.partial});
     let shown = body.label.clone().unwrap_or_else(|| question.clone());
     {
         let conn = state.db.conn();
         let time = now();
-        conn.execute("INSERT INTO messages(chat_id,role,content,created_at) VALUES(?1,'user',?2,?3)", params![chat, shown, time])?;
+        conn.execute("INSERT INTO messages(chat_id,role,content,created_at,context) VALUES(?1,'user',?2,?3,?4)", params![chat, shown, time, context.to_string()])?;
         let title: String = shown.chars().take(70).collect();
         conn.execute("UPDATE chats SET title=CASE WHEN title='' THEN ?2 ELSE title END, updated_at=?3 WHERE id=?1", params![chat, title, time])?;
     }
@@ -120,6 +122,7 @@ async fn ask(State(state): State<AppState>, Path(chat): Path<String>, Json(body)
     tokio::spawn(async move { ai::run(&run_provider, &cwd, turn, tx).await });
 
     let stream = async_stream::stream! {
+        yield sse(json!({"type": "context", "context": context}));
         yield sse(json!({"type": "citations", "citations": citations}));
         let mut answer = String::new();
         let mut failed: Option<String> = None;
@@ -140,8 +143,8 @@ async fn ask(State(state): State<AppState>, Path(chat): Path<String>, Json(body)
                 let conn = state.db.conn();
                 let cited = serde_json::to_string(&citations).unwrap_or_else(|_| "[]".into());
                 let _ = conn.execute(
-                    "INSERT INTO messages(chat_id,role,content,citations,provider,created_at) VALUES(?1,'assistant',?2,?3,?4,?5)",
-                    params![chat, answer, cited, provider, now()],
+                    "INSERT INTO messages(chat_id,role,content,citations,provider,created_at,context) VALUES(?1,'assistant',?2,?3,?4,?5,?6)",
+                    params![chat, answer, cited, provider, now(), context.to_string()],
                 );
                 conn.last_insert_rowid()
             };

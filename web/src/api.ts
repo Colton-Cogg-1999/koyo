@@ -1,6 +1,6 @@
 import type {
   Annotation, Audiobook, AudiobookRow, BlockLocation, Book, BookDetail, ChatSummary, Citation, Collection, Message,
-  Note, Providers, SearchHit, Storage, TrackDetail, TtsStatus,
+  Note, Providers, MessageContext, SearchHit, Storage, TrackDetail, TtsStatus,
 } from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -99,6 +99,7 @@ export interface AskBody {
   question: string;
   label?: string;
   selection?: string;
+  attachment?: { text: string; block: number; end_block: number };
   block?: number;
   scope?: 'page' | 'selection' | 'chapter' | 'book' | 'search';
   end_block?: number;
@@ -107,6 +108,7 @@ export interface AskBody {
 }
 
 export type AskEvent =
+  | { type: 'context'; context: MessageContext }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'delta'; text: string }
   | { type: 'error'; message: string }

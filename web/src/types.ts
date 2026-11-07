@@ -128,7 +128,10 @@ export interface Citation {
   quote: string;
 }
 
+export interface MessageContext { selection?: string; scope?: string; partial?: boolean; block?: number; chapter?: number; attachment?: { text: string; block: number; end_block: number } | null }
+
 export interface Message {
+  context?: MessageContext;
   id?: number;
   role: 'user' | 'assistant';
   content: string;
