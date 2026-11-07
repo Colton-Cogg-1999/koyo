@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { api, onServerEvent } from './api';
-import { AudioPane, NowPane, WORKSPACES } from './LeftPanes';
+import { AudioPane, WORKSPACES } from './LeftPanes';
 import { Reader } from './reader/Reader';
 import { navigate, useRoute } from './route';
 import type { Book, Collection, SearchHit } from './types';
@@ -14,11 +14,12 @@ export function App() {
   const [books, reloadBooks] = useAsync<Book[]>(() => api.books(), []);
   const [collections, reloadCollections] = useAsync<Collection[]>(() => api.collections(), []);
   const [dragging, setDragging] = useState(false);
-  const [audioOpen, setAudioOpen] = useState(false);
   const [focus, setFocus] = useState(false);
   const [search, setSearch] = useState<{ book?: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const depth = useRef(0);
+  const lastRead = useRef<string | null>(null);
+  useEffect(() => { if (route.view === 'read') lastRead.current = route.id; }, [route]);
 
   const refresh = useCallback(() => {
     reloadBooks();
@@ -36,7 +37,7 @@ export function App() {
 
   const goWorkspace = useCallback((path: string) => {
     if (path) navigate(path);
-    else if (latest) navigate(`read/${latest.id}`);
+    else if (lastRead.current ?? latest?.id) navigate(`read/${lastRead.current ?? latest!.id}`);
   }, [latest]);
 
   useEffect(() => {
@@ -72,7 +73,7 @@ export function App() {
 
   return (
     <div
-      className={`app ${focus ? 'zen' : ''} ${audioOpen ? 'audio-open' : ''}`}
+      className={`app ${focus ? 'zen' : ''}`}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
         depth.current++;
@@ -93,18 +94,19 @@ export function App() {
       }}
     >
       {!focus && (
-        <aside className="left">
-          <NowPane route={route} latest={latest} onWorkspace={goWorkspace} />
-          <button className="mobile-audio ghost" aria-expanded={audioOpen} onClick={() => setAudioOpen(!audioOpen)}>{audioOpen ? 'Close audio' : 'Audio controls'}</button>
-          <AudioPane />
-        </aside>
+        <header className="app-nav">
+          <button className="app-brand" onClick={() => navigate('library')}>OMA<span>READER</span></button>
+          <nav className="workspaces" aria-label="Workspaces">
+            {WORKSPACES.map((space) => <button key={space.key} className={route.view === space.match ? 'on' : ''} aria-current={route.view === space.match ? 'page' : undefined} title={`${space.label} (${space.key})`} onClick={() => goWorkspace(space.path)}>{space.label}</button>)}
+          </nav>
+        </header>
       )}
       <main className="main">
         {route.view === 'library' && <Library books={books ?? []} collections={collections ?? []} filter={route} onChange={refresh} onImport={() => fileInput.current?.click()} />}
         {route.view === 'ask' && <AskBook key={route.id} id={route.id} />}
         {route.view === 'read' && <Reader key={route.id} id={route.id} startBlock={route.block} focus={focus} setFocus={setFocus} />}
         {route.view === 'annotations' && <Annotations />}
-        {route.view === 'audiobooks' && <Audiobooks />}
+        {route.view === 'audiobooks' && <div className="audio-workspace"><Audiobooks /><AudioPane fallbackBookId={latest?.id} /></div>}
         {route.view === 'notebook' && <Notebook />}
         {route.view === 'settings' && <Settings />}
       </main>

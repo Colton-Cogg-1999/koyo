@@ -125,12 +125,15 @@ function eta(seconds: number) {
   return minutes < 60 ? `~${minutes}m` : `~${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }
 
-export function AudioPane() {
-  const { book, location, listenFrom } = useSession();
+export function AudioPane({ fallbackBookId }: { fallbackBookId?: string }) {
+  const session = useSession();
   const audio = usePlayer();
   const [status, reloadStatus] = useAsync(() => api.tts(), []);
   const { install, setInstall } = useInstall(reloadStatus);
-  const bookId = book?.id ?? audio.book;
+  const bookId = session.book?.id ?? audio.book ?? fallbackBookId;
+  const [storedBook] = useAsync(() => bookId ? api.book(bookId) : Promise.resolve(null), [bookId]);
+  const book = session.book ?? (storedBook?.id === bookId ? storedBook : null);
+  const block = session.book ? session.location.block : book?.position?.block ?? 0;
   const [summary, reload] = useAsync(() => (bookId ? api.audio(bookId) : Promise.resolve(null)), [bookId]);
   const [progress, setProgress] = useState<{ eta: number | null } | null>(null);
   const [voice, setVoice] = useState('');
@@ -176,9 +179,9 @@ export function AudioPane() {
     };
   }, [chapterIndex, readyHere, bookId]);
 
-  const start = async (block?: number) => {
+  const start = async (fromBlock?: number) => {
     if (!book) return;
-    const started = await api.startAudio(book.id, voice, block ?? location.block);
+    const started = await api.startAudio(book.id, voice, fromBlock ?? block);
     reload();
     await player.load(book.id, book.title);
     await player.refresh();
@@ -186,7 +189,7 @@ export function AudioPane() {
     setChanging(false);
   };
 
-  const title = 'KOKORO AUDIOBOOK';
+  const title = `KOKORO AUDIOBOOK${book ? ` // ${book.title}` : ''}`;
   if (!status) return <Pane title={title} className="audio"><p className="hint">loading…</p></Pane>;
   if (!status.ffmpeg) return <Pane title={title} className="audio"><p className="hint">requires ffmpeg: <code>sudo pacman -S ffmpeg</code></p></Pane>;
 
@@ -263,7 +266,7 @@ export function AudioPane() {
       </div>
       <p className="audio-chapter">{chapter?.title ?? audio.title}</p>
       {audio.waiting && <p className="hint">synthesizing this part. playback starts on its own.</p>}
-      {book && <button className="ghost wide" onClick={() => void listenFrom(location.block).catch(failure)}>&gt; listen from here</button>}
+      {book && <button className="ghost wide" onClick={() => void start(block).then(() => player.playBlock(block)).catch(failure)}>&gt; listen from here</button>}
       <div className="gen-status">
         {summary.status === 'failed' ? (
           <p className="error">ERR&gt; {summary.error}</p>
