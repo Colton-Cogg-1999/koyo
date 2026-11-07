@@ -52,10 +52,11 @@ fn open_window(url: &str, paths: &Paths) -> Result<Option<std::process::Child>> 
     Ok(Some(child))
 }
 
-async fn already_running(port: u16) -> bool {
-    let url = format!("http://127.0.0.1:{port}/api/health");
-    match reqwest::Client::new().get(url).timeout(std::time::Duration::from_secs(2)).send().await {
-        Ok(response) => response.text().await.is_ok_and(|body| body.contains("omareader")),
+async fn already_running(port: u16, paths: &Paths) -> bool {
+    let Ok(token) = config::session_token(paths) else { return false };
+    let url = format!("http://127.0.0.1:{port}/api/books");
+    match reqwest::Client::new().get(url).header("Cookie", format!("oma_session={token}")).timeout(std::time::Duration::from_secs(2)).send().await {
+        Ok(response) => response.status().is_success(),
         Err(_) => false,
     }
 }
@@ -64,7 +65,7 @@ async fn run_desktop(paths: Paths, db: Db) -> Result<()> {
     let bound = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], DEFAULT_PORT))).await;
     let listener = match bound {
         Ok(listener) => listener,
-        Err(_) if already_running(DEFAULT_PORT).await => {
+        Err(_) if already_running(DEFAULT_PORT, &paths).await => {
             let token = config::session_token(&paths)?;
             open_window(&format!("http://127.0.0.1:{DEFAULT_PORT}/auth?t={token}"), &paths)?;
             return Ok(());
