@@ -3,60 +3,63 @@ import { FileText, FolderOpen, Pause, Play, Plus, RefreshCw, Trash2 } from 'luci
 import { api, onServerEvent, urls } from '../api';
 import { player, usePlayer } from '../audio';
 import { renderMarkdown } from '../markdown';
+import { TypePanel } from '../reader/TypePanel';
+import { stored, saveLocal } from '../preferences';
 import { NoteSheet } from '../reader/Margin';
 import { navigate } from '../route';
 import { setThemeMode, themeMode } from '../theme';
-import type { Color, Note } from '../types';
+import { defaultPrefs, type ReaderPrefs, type Annotation, type Note } from '../types';
 import { bytes, clock, Cover, Empty, failure, Gauge, Pane, toast, useAsync, when } from '../ui';
 
 export function Annotations() {
-  const [items] = useAsync(() => api.annotations({ kind: 'highlight' }), []);
-  const [color, setColor] = useState<Color | null>(null);
+  const [items, reload] = useAsync(() => api.annotations(), []);
+  const [kind, setKind] = useState('All');
   const [query, setQuery] = useState('');
+  const [book, setBook] = useState('');
+  const [editing, setEditing] = useState<Annotation | null>(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
   const groups = useMemo(() => {
-    const needle = query.toLowerCase();
-    const map = new Map<string, NonNullable<typeof items>>();
-    for (const item of items ?? []) {
-      if (color && item.color !== color) continue;
-      if (needle && !`${item.quote} ${item.note}`.toLowerCase().includes(needle)) continue;
+    const needle = query.trim().toLowerCase();
+    const map = new Map<string, Annotation[]>();
+    for (const item of [...(items ?? [])].sort((a,b) => a.block - b.block || a.created_at - b.created_at)) {
+      if (book && item.book_id !== book) continue;
+      if (kind === 'Notes' && !item.note) continue;
+      if (kind === 'Highlights' && (item.kind !== 'highlight' || JSON.parse(item.anchor).kind === 'bookmark')) continue;
+      if (kind === 'Bookmarks' && item.kind !== 'bookmark') continue;
+      if (needle && !`${item.quote} ${item.note} ${item.book_title} ${item.chapter}`.toLowerCase().includes(needle)) continue;
       map.set(item.book_id, [...(map.get(item.book_id) ?? []), item]);
     }
     return [...map.values()];
-  }, [items, color, query]);
-  return (
-    <Pane
-      className="full"
-      title="MARKS"
-      tools={
-        <>
-          {(['blue', 'green', 'pink', 'yellow'] as Color[]).map((c) => (
-            <button key={c} className={`swatch ${c} ${color === c ? 'on' : ''}`} title={c} onClick={() => setColor(color === c ? null : c)} />
-          ))}
-          <input type="search" aria-label="Filter marks" placeholder="filter" value={query} onChange={(event) => setQuery(event.target.value)} />
-        </>
-      }
-    >
-      <div className="scroll">
-        {groups.map((list) => (
-          <section className="mark-group" key={list[0].book_id}>
-            <header>
-              <h2>{list[0].book_title}</h2>
-              <span>{list[0].book_author}</span>
-              <a className="ghost" href={urls.notesMarkdown(list[0].book_id)} download><FileText size={13} /> .md</a>
-            </header>
-            {list.map((item) => (
-              <button key={item.id} className={`passage ${item.color}`} onClick={() => navigate(`read/${item.book_id}?b=${item.block}`)}>
-                <blockquote>{item.quote}</blockquote>
-                {item.note && <em>{item.note}</em>}
-                <small>{item.chapter}{item.page ? ` :: p.${item.page}` : ''} :: {when(item.created_at)}</small>
-              </button>
-            ))}
-          </section>
-        ))}
-        {items && !groups.length && <Empty title="no marks">select text while reading to highlight or annotate.</Empty>}
-      </div>
-    </Pane>
-  );
+  }, [items, kind, query, book]);
+  const edit = (item: Annotation) => { setEditing(item); setDraft(stored(`mark-draft:${item.id}`, item.note)); };
+  const save = async () => {
+    if (!editing || saving) return;
+    setSaving(true);
+    try { await api.updateAnnotation(editing.id, { note: draft }); localStorage.removeItem(`omareader:mark-draft:${editing.id}`); setEditing(null); reload(); }
+    catch (error) { failure(error); } finally { setSaving(false); }
+  };
+  return <Pane className="full marks-view" title="Marks" tools={<><a className="ghost" href="/api/annotations/export.md" download>Export Markdown</a><button className="ghost" onClick={() => navigate('notebook')}>Saved writing</button></>}>
+    <div className="marks-tools">
+      <input type="search" aria-label="Filter marks" placeholder="Search marks" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <select aria-label="Filter marks by book" value={book} onChange={(e) => setBook(e.target.value)}><option value="">All books</option>{[...new Map(items?.map((i) => [i.book_id, i.book_title])).entries()].map(([id,title]) => <option key={id} value={id}>{title}</option>)}</select>
+      <div className="tabs">{['All','Highlights','Notes','Bookmarks'].map((k) => <button key={k} className={`tab ${kind === k ? 'on' : ''}`} onClick={() => setKind(k)}>{k}</button>)}</div>
+    </div>
+    <div className="scroll">
+      {groups.map((list) => <section className="mark-group" key={list[0].book_id}>
+        <header><h2>{list[0].book_title}</h2><span>{list[0].book_author}</span><a className="ghost" href={urls.notesMarkdown(list[0].book_id)} download><FileText size={13} /> .md</a></header>
+        {list.map((item) => <article key={item.id} className="mark-entry">
+          <button className="passage" onClick={() => navigate(`read/${item.book_id}?b=${item.block}&p=${item.page}`)}>
+            <small>{item.kind === 'bookmark' ? 'Bookmark · ' : ''}{item.chapter || 'Location'} · {item.page ? `p. ${item.page}` : `Location ${item.block + 1}`}</small>
+            {item.quote && <blockquote>{item.quote}</blockquote>}{item.note && <p>{item.note}</p>}
+          </button>
+          {editing?.id === item.id ? <div className="mark-editor"><textarea autoFocus aria-label="Edit mark note" value={draft} onChange={(e) => { setDraft(e.target.value); saveLocal(`mark-draft:${item.id}`,e.target.value); }} onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') void save(); if (e.key === 'Escape') setEditing(null); }} /><button className="ghost" disabled={saving} onClick={() => void save()}>Save</button><button className="ghost" onClick={() => setEditing(null)}>Cancel</button></div> : <button className="ghost" onClick={() => edit(item)}>Edit note</button>}
+          <button className="ghost danger" onClick={() => { if (window.confirm('Delete this mark and its note?')) void api.deleteAnnotation(item.id).then(reload).catch(failure); }}>Delete</button>
+        </article>)}
+      </section>)}
+      {items && !groups.length && <p className="hint">No marks here.</p>}
+    </div>
+  </Pane>;
 }
 
 export function Audiobooks() {
@@ -130,6 +133,8 @@ export function Settings() {
   const [theme] = useAsync(() => api.theme(), []);
   const [mode, setMode] = useState(themeMode());
   const [checking, setChecking] = useState(false);
+  const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
+  useEffect(() => { void api.settings().then((s) => setPrefs({ ...defaultPrefs, ...(s.reader as Partial<ReaderPrefs> ?? {}) })).catch(failure); }, []);
 
   const recheck = async () => {
     setChecking(true);
@@ -146,6 +151,8 @@ export function Settings() {
   return (
     <Pane className="full" title="Settings">
       <div className="scroll settings">
+        <section className="settings-reading"><h2>Reading</h2><TypePanel prefs={prefs} pdf={false} onClose={() => {}} onChange={(patch) => { const next = { ...prefs, ...patch }; setPrefs(next); void api.saveSettings({ reader: next }).catch(failure); }} /></section>
+        <section><h2>Keyboard</h2><dl className="paths"><dt>Command palette</dt><dd>Ctrl+Shift+P</dd><dt>Find in book</dt><dd>Ctrl+F</dd><dt>Library</dt><dd>Ctrl+L</dd><dt>Bookmark</dt><dd>Ctrl+D</dd><dt>Sidebar</dt><dd>Ctrl+B</dd><dt>Ask this book</dt><dd>Ctrl+J</dd><dt>Page movement</dt><dd>Page Up / Page Down</dd></dl></section>
         <section>
           <h2>Appearance</h2>
           <div className="choices">

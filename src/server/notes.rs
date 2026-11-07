@@ -185,8 +185,21 @@ async fn export_book(State(state): State<AppState>, Path(id): Path<String>) -> R
     Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8".to_string()), (header::CONTENT_DISPOSITION, disposition)], markdown).into_response())
 }
 
+async fn export_all(State(state): State<AppState>) -> Result<Response, ApiError> {
+    let ids: Vec<String> = {
+        let conn = state.db.conn();
+        let mut stmt = conn.prepare("SELECT id FROM books WHERE id IN (SELECT book_id FROM annotations) OR id IN (SELECT book_id FROM notes) ORDER BY title")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut markdown = String::new();
+    for id in ids { markdown.push_str(&notes::book_markdown(&state.db, &id)?.1); markdown.push_str("\n---\n\n"); }
+    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8"), (header::CONTENT_DISPOSITION, "attachment; filename=\"OmaReader marks.md\"")], markdown).into_response())
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route("/api/annotations/export.md", get(export_all))
         .route("/api/annotations", get(all_annotations).post(create_annotation))
         .route("/api/annotations/{id}", patch(update_annotation).delete(delete_annotation))
         .route("/api/notes", get(list_notes).post(create_note))

@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Copy, Headphones, Maximize2, Minimize2, PanelRight, PenLine, Search, Sparkles, Trash2, Type, X } from 'lucide-react';
+import { ArrowLeft, Bookmark, Maximize2, Minimize2, PanelRight, PenLine, Search, Sparkles, Trash2, Type } from 'lucide-react';
 import { api } from '../api';
 import { player, usePlayer } from '../audio';
 import { navigate } from '../route';
 import { clearSession, publishSession, type Location } from '../session';
 import { defaultPrefs, type Annotation, type BookDetail, type Color, type ReaderPrefs } from '../types';
 import { failure, Pane, toast, useAsync } from '../ui';
+import { useLocalPreference, editingTarget, readerCommand } from '../preferences';
+import { ReadingProgress } from './ReadingProgress';
+import { ReaderSidebar } from './ReaderSidebar';
+import { TypePanel } from './TypePanel';
 import { Agent } from './Agent';
 import { Margin, type MarginTab } from './Margin';
 import { PdfView } from './PdfView';
@@ -22,24 +26,17 @@ function samePositions(a: NotePositions, b: NotePositions) {
   }
   return true;
 }
-const PAPERS: ReaderPrefs['paper'][] = ['term', 'ivory', 'sepia'];
-const FONTS: { id: ReaderPrefs['font']; label: string }[] = [
-  { id: 'mono', label: 'JetBrains' },
-  { id: 'newsreader', label: 'Newsreader' },
-  { id: 'literata', label: 'Literata' },
-  { id: 'sans', label: 'Sans' },
-];
-
-export function Reader({ id, startBlock, focus, setFocus }: { id: string; startBlock: number | null; focus: boolean; setFocus: (on: boolean) => void }) {
+export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: string; startBlock: number | null; startPage: number | null; focus: boolean; setFocus: (on: boolean) => void }) {
   const [book, , setBook] = useAsync(() => api.book(id), [id]);
   const [annotations, reloadAnnotations, setAnnotations] = useAsync(() => api.annotations({ book: id }), [id]);
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
   const [location, setLocation] = useState<Location>({ block: 0, fraction: 0, page: 1, ratio: 0 });
   const [jump, setJump] = useState<Jump | null>(null);
+  const [contextMark, setContextMark] = useState<Annotation | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [editing, setEditing] = useState<{ annotation: Annotation; rect: DOMRect } | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);
-  const [sideOpen, setSideOpen] = useState(() => window.innerWidth > 1040);
+  const [sideOpen, setSideOpen] = useLocalPreference('sidebar-open', window.innerWidth > 1040);
   const [tab, setTab] = useState<MarginTab>('margin');
   const [askSeed, setAskSeed] = useState<{ selection: string; block: number; endBlock: number; question?: string; nonce: number } | null>(null);
   const [notePositions, setNotePositions] = useState<NotePositions>(new Map());
@@ -47,25 +44,36 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
   const saveTimer = useRef(0);
   const pendingPosition = useRef<Location | null>(null);
   const nonce = useRef(1);
+  const [returnTo, setReturnTo] = useState<Location | null>(null);
+  const [undoMark, setUndoMark] = useState<Annotation | null>(null);
+  const currentLocation = useRef(location);
+  currentLocation.current = location;
   const mark = audio.book === id ? audio.mark : null;
+
+  useEffect(() => {
+    const refresh = () => reloadAnnotations();
+    window.addEventListener('oma-annotations-changed', refresh);
+    return () => window.removeEventListener('oma-annotations-changed', refresh);
+  }, []);
 
   useEffect(() => {
     api.settings().then((s) => s.reader && setPrefs({ ...defaultPrefs, ...(s.reader as Partial<ReaderPrefs>) })).catch(() => {});
   }, []);
 
   const go = useCallback((block: number, flash = true) => {
+    setReturnTo(currentLocation.current);
     setJump({ block, flash, nonce: ++nonce.current });
   }, []);
 
   useEffect(() => {
     if (!book) return;
     const saved = book.position;
-    if (startBlock !== null) setJump({ block: startBlock, flash: true, nonce: ++nonce.current });
+    if (startBlock !== null) setJump({ block: startBlock, page: startPage || undefined, flash: true, nonce: ++nonce.current });
     else if (saved) setJump({ block: saved.block, page: saved.page || undefined, fraction: saved.fraction, nonce: ++nonce.current });
     else setJump({ block: 0, fraction: 0, nonce: ++nonce.current });
     setLocation((l) => ({ ...l, ratio: saved?.progress ?? 0, page: saved?.page || 1 }));
     void player.load(book.id, book.title).catch(() => {});
-  }, [book?.id, startBlock]);
+  }, [book?.id, startBlock, startPage]);
 
   const flushPosition = useCallback(() => {
     window.clearTimeout(saveTimer.current);
@@ -113,12 +121,15 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
 
   const changePrefs = (patch: Partial<ReaderPrefs>) => {
     const next = { ...prefs, ...patch };
+    setJump({ block: location.block, page: location.page || undefined, fraction: location.fraction, nonce: ++nonce.current });
     setPrefs(next);
     void api.saveSettings({ reader: next }).catch(failure);
   };
 
   const highlight = async (color: Color, note = '') => {
     if (!picked) return null;
+    const existing = annotations?.find((a) => a.kind === 'highlight' && a.block === picked.block && a.quote === picked.quote && JSON.stringify(JSON.parse(a.anchor), Object.keys(picked.anchor).sort()) === JSON.stringify(picked.anchor, Object.keys(picked.anchor).sort()));
+    if (existing) { setPicked(null); return existing; }
     const created = await api.createAnnotation({ book_id: id, kind: 'highlight', color, anchor: picked.anchor, block: picked.block, page: picked.page, quote: picked.quote, note });
     setAnnotations((list) => [...(list ?? []), created]);
     window.getSelection()?.removeAllRanges();
@@ -128,24 +139,18 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
 
   const startNote = async () => {
     const rect = picked?.rect;
-    const created = await highlight('blue').catch(failure);
+    const created = await highlight('green').catch(failure);
     if (created && rect) setEditing({ annotation: created, rect });
   };
 
-  const askAbout = (question?: string) => {
+  const askAbout = () => {
     if (!picked) return;
-    setAskSeed({ selection: picked.quote, block: picked.block, endBlock: picked.anchor.kind === 'text' ? picked.anchor.endBlock : (picked.endBlock ?? picked.block), question, nonce: ++nonce.current });
+    setContextMark({ id: 'ask-context', book_id: id, kind: 'highlight', color: 'green', anchor: JSON.stringify(picked.anchor), block: picked.block, page: picked.page, quote: picked.quote, note: '', created_at: Date.now(), updated_at: Date.now() });
+    setAskSeed({ selection: picked.quote, block: picked.block, endBlock: picked.anchor.kind === 'text' ? picked.anchor.endBlock : (picked.endBlock ?? picked.block), nonce: ++nonce.current });
     setSideOpen(true);
+    readerCommand('focus-chat');
     window.getSelection()?.removeAllRanges();
     setPicked(null);
-  };
-
-  const listenHere = async () => {
-    if (!picked) return;
-    const block = picked.block;
-    window.getSelection()?.removeAllRanges();
-    setPicked(null);
-    await listenFrom(block);
   };
 
   const bookmarks = useMemo(() => (annotations ?? []).filter((a) => a.kind === 'bookmark'), [annotations]);
@@ -164,7 +169,14 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).closest('input,textarea,[contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (editingTarget(event.target)) return;
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        if (event.key.toLowerCase() === 'd') { event.preventDefault(); void toggleBookmark().catch(failure); }
+        if (event.key.toLowerCase() === 'b') { event.preventDefault(); setSideOpen((v) => !v); }
+        if (event.key.toLowerCase() === 'j') { event.preventDefault(); setSideOpen(true); readerCommand('focus-chat'); }
+        return;
+      }
+      if (event.altKey) return;
       const chapters = book?.chapters ?? [];
       const current = chapters.findLastIndex((c) => c.start <= location.block);
       switch (event.key) {
@@ -188,39 +200,47 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  useEffect(() => {
+    const command = (event: Event) => {
+      switch ((event as CustomEvent<string>).detail) {
+        case 'bookmark': void toggleBookmark().catch(failure); break;
+        case 'sidebar': setSideOpen((v) => !v); break;
+        case 'toggle-notes': case 'toggle-chat': case 'focus-chat': setSideOpen(true); break;
+        case 'chapters': setSideOpen(true); setTab('index'); break;
+        case 'appearance': setTypeOpen((v) => !v); break;
+        case 'ask-selection': askAbout(); break;
+      }
+    };
+    window.addEventListener('oma-reader-command', command);
+    return () => window.removeEventListener('oma-reader-command', command);
+  });
+  useEffect(() => {
+    if (!undoMark) return;
+    const timer = window.setTimeout(() => setUndoMark(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [undoMark]);
+
   if (!book || !jump) return <div className="reader-loading">loading…</div>;
   if (book.status !== 'ready') {
     return <div className="reader-loading">{book.status === 'failed' ? book.error : 'indexing…'}</div>;
   }
 
-  const props = { book, prefs, annotations: annotations ?? NO_ANNOTATIONS, jump, mark, onLocation, onPick: setPicked, onNotes,
+  const props = { book, prefs, annotations: contextMark ? [...(annotations ?? []), contextMark] : annotations ?? NO_ANNOTATIONS, jump, mark, onLocation, onPick: setPicked, onNotes,
     onJump: (block: number) => go(block, false),
-    onHit: (annotation: Annotation, rect: DOMRect) => setEditing({ annotation, rect }) };
+    onHit: (annotation: Annotation, rect: DOMRect) => { if (annotation.id !== 'ask-context') setEditing({ annotation, rect }); } };
   const chapter = chapterTitle(book, location.block);
-  const pdf = book.format === 'pdf';
-  const zoomValue = pdf ? prefs.zoom : prefs.size / defaultPrefs.size;
-  const adjustZoom = (direction: number) => {
-    if (pdf) changePrefs({ zoom: Math.max(0.6, Math.min(2.5, Math.round((prefs.zoom + direction * 0.1) * 100) / 100)) });
-    else changePrefs({ size: Math.max(13, Math.min(40, prefs.size + direction * 2)) });
-    setJump({ block: location.block, page: location.page || undefined, fraction: location.fraction, nonce: ++nonce.current });
-  };
 
   return (
     <div className={`reader ${focus ? 'zen' : ''}`}>
       <Pane
         className="volume"
-        title={<>{book.title}{chapter && <i> // {chapter}</i>}</>}
+        title={<>{book.title}<i>{chapter && chapter !== book.title ? `${chapter} · ` : ''}{Math.round(location.ratio * 100)}%</i></>}
         tools={
           <>
             <button className="icon" title="Library" onClick={() => navigate('library')}><ArrowLeft size={16} /></button>
-            <button className="icon" title="Search (/)" onClick={() => window.dispatchEvent(new CustomEvent('oma-search', { detail: { book: id } }))}><Search size={15} /></button>
-            <div className="reader-zoom" role="group" aria-label="Reading zoom">
-              <button className="icon" title="Zoom out" aria-label="Zoom out" disabled={pdf ? prefs.zoom <= 0.6 : prefs.size <= 13} onClick={() => adjustZoom(-1)}>−</button>
-              <button className="tab" title="Reset zoom" aria-label="Reset zoom" onClick={() => changePrefs(pdf ? { zoom: 1 } : { size: defaultPrefs.size })}>{Math.round(zoomValue * 100)}%</button>
-              <button className="icon" title="Zoom in" aria-label="Zoom in" disabled={pdf ? prefs.zoom >= 2.5 : prefs.size >= 40} onClick={() => adjustZoom(1)}>+</button>
-            </div>
+            <button className="icon" title="Search (Ctrl+F)" onClick={() => window.dispatchEvent(new CustomEvent('oma-search', { detail: { book: id } }))}><Search size={15} /></button>
             <button className={`icon ${typeOpen ? 'on' : ''}`} title="Text and page" onClick={() => setTypeOpen(!typeOpen)}><Type size={15} /></button>
-            <button className={`icon ${here ? 'on' : ''}`} title="Bookmark (b)" onClick={() => void toggleBookmark().catch(failure)}><Bookmark size={15} fill={here ? 'currentColor' : 'none'} /></button>
+            <button className={`icon ${here ? 'on' : ''}`} title="Bookmark (Ctrl+D)" onClick={() => void toggleBookmark().catch(failure)}><Bookmark size={15} fill={here ? 'currentColor' : 'none'} /></button>
             <button className={`icon ${sideOpen ? 'on' : ''}`} title="Side panes (\)" onClick={() => setSideOpen(!sideOpen)}><PanelRight size={15} /></button>
             <button className="icon" title="Zen mode (f)" onClick={() => setFocus(!focus)}>{focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
           </>
@@ -233,21 +253,17 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
         </div>
         {picked && (
           <div className="pick-menu" style={menuPosition(picked.rect)} onMouseDown={(event) => event.preventDefault()}>
-            {COLORS.map((color) => <button key={color} className={`swatch ${color}`} title={`Highlight ${color}`} onClick={() => void highlight(color).catch(failure)} />)}
-            <i />
-            <button title="Add a note" onClick={() => void startNote()}><PenLine size={15} /></button>
-            <button title="Ask Oma" onClick={() => askAbout()}><Sparkles size={15} /></button>
-            <button title="Explain this" className="text" onClick={() => askAbout('Explain this passage.')}>explain</button>
-            <button title="Listen from here" onClick={() => void listenHere().catch(failure)}><Headphones size={15} /></button>
-            <button title="Copy" onClick={() => void navigator.clipboard.writeText(picked.quote).then(() => toast('copied'))}><Copy size={14} /></button>
+            <button title="Highlight" onClick={() => void highlight('green').then((a) => a && !annotations?.some((old) => old.id === a.id) && setUndoMark(a)).catch(failure)}>Highlight</button>
+            <button title="Add a note" onClick={() => void startNote()}><PenLine size={14} /> Note</button>
+            <button title="Ask Oma" onClick={() => askAbout()}><Sparkles size={14} /> Ask</button>
           </div>
         )}
+        {undoMark && <div className="highlight-undo" role="status">Highlight saved <button className="tab" onClick={() => void api.deleteAnnotation(undoMark.id).then(() => { setAnnotations((list) => list?.filter((a) => a.id !== undoMark.id) ?? []); setUndoMark(null); }).catch(failure)}>Undo</button></div>}
+        <ReadingProgress book={book} location={location} seek={(ratio) => { setReturnTo(location); seek(ratio); }} back={returnTo ? () => { setJump({ block: returnTo.block, page: returnTo.page || undefined, fraction: returnTo.fraction, nonce: ++nonce.current }); setReturnTo(null); } : undefined} />
       </Pane>
 
-      {sideOpen && !focus && (
-        <div className="side">
-          <button className="side-close ghost" onClick={() => setSideOpen(false)}>Back to reading</button>
-          <Margin
+      {(
+        <ReaderSidebar open={sideOpen && !focus} onClose={() => setSideOpen(false)} notes={<Margin
             book={book}
             annotations={annotations ?? NO_ANNOTATIONS}
             positions={notePositions}
@@ -258,9 +274,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
             go={go}
             reload={reloadAnnotations}
             onEdit={(annotation, rect) => setEditing({ annotation, rect })}
-          />
-          <Agent book={book} location={location} seed={askSeed} go={go} />
-        </div>
+          />} chat={<Agent book={book} location={location} seed={askSeed} go={go} onSelectionClear={() => setContextMark(null)} />} />
       )}
 
       {editing && (
@@ -291,48 +305,11 @@ function chapterTitle(book: BookDetail | null, block: number) {
 }
 
 function menuPosition(rect: DOMRect) {
-  const top = rect.top > 90 ? rect.top - 50 : rect.bottom + 10;
+  const top = Math.max(8, Math.min(window.innerHeight - 52, rect.top > 90 ? rect.top - 50 : rect.bottom + 10));
   const left = Math.max(12, Math.min(window.innerWidth - 340, rect.left + rect.width / 2 - 150));
   return { top, left };
 }
 
-function TypePanel({ prefs, pdf, onChange, onClose }: { prefs: ReaderPrefs; pdf: boolean; onChange: (patch: Partial<ReaderPrefs>) => void; onClose: () => void }) {
-  return (
-    <aside className="type-panel">
-      <header>
-        <h3>DISPLAY</h3>
-        <button className="icon" onClick={onClose} title="Close"><X size={15} /></button>
-      </header>
-      <div className="choices">
-        {PAPERS.map((paper) => (
-          <button key={paper} className={prefs.paper === paper ? 'on' : ''} onClick={() => onChange({ paper })}>{paper}</button>
-        ))}
-      </div>
-      {pdf ? (
-        <label>zoom <output>{Math.round(prefs.zoom * 100)}%</output>
-          <input type="range" min={0.6} max={2.5} step={0.05} value={prefs.zoom} onChange={(event) => onChange({ zoom: Number(event.target.value) })} />
-        </label>
-      ) : (
-        <>
-          <div className="choices two">
-            {FONTS.map((font) => (
-              <button key={font.id} className={`font-${font.id} ${prefs.font === font.id ? 'on' : ''}`} onClick={() => onChange({ font: font.id })}>{font.label}</button>
-            ))}
-          </div>
-          <label>size <output>{prefs.size}px</output>
-            <input type="range" min={13} max={40} value={prefs.size} onChange={(event) => onChange({ size: Number(event.target.value) })} />
-          </label>
-          <label>leading <output>{prefs.leading.toFixed(2)}</output>
-            <input type="range" min={1.3} max={2} step={0.02} value={prefs.leading} onChange={(event) => onChange({ leading: Number(event.target.value) })} />
-          </label>
-          <label>measure <output>{prefs.width}em</output>
-            <input type="range" min={28} max={60} value={prefs.width} onChange={(event) => onChange({ width: Number(event.target.value) })} />
-          </label>
-        </>
-      )}
-    </aside>
-  );
-}
 
 function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
   annotation: Annotation;
@@ -375,14 +352,14 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
       <textarea
         ref={box}
         value={note}
-        placeholder=">>> note"
+        placeholder="Write a note…"
         disabled={saving}
         onChange={(event) => changeNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void close();
           if (event.key === 'Escape') {
             event.stopPropagation();
-            void close();
+            onClose();
           }
         }}
       />
@@ -393,6 +370,7 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
         ))}
         <span />
         <button className="icon" title="Remove" disabled={saving} onClick={() => void onDelete().then(() => localStorage.removeItem(draftKey)).catch(failure)}><Trash2 size={15} /></button>
+        <button className="tab" disabled={saving} onClick={onClose}>Cancel</button>
         <button className="solid" disabled={saving} onClick={() => void close()}>{saving ? 'saving…' : 'save'}</button>
       </footer>
     </div>

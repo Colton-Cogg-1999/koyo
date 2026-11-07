@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocalPreference } from '../preferences';
 import { api, urls } from '../api';
 import { Agent } from '../reader/Agent';
 import { navigate } from '../route';
@@ -14,6 +15,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
   onImport: () => void;
 }) {
   const [query, setQuery] = useState('');
+  const [view, setView] = useLocalPreference('library-view', 'grid');
   const [cursor, setCursor] = useState(0);
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -64,7 +66,8 @@ export function Library({ books, collections, filter, onChange, onImport }: {
           <button className="ghost" onClick={() => navigate('settings')}>Manage storage</button>
         </div>
         <div className="shelf-tools">
-          <input type="search" aria-label="Filter" placeholder="filter" value={query} onChange={(event) => { setQuery(event.target.value); setCursor(0); }} />
+          <input type="search" aria-label="Filter" placeholder="Search title or author" value={query} onChange={(event) => { setQuery(event.target.value); setCursor(0); }} />
+          <button className="ghost" aria-label="Library layout" onClick={() => setView(view === 'grid' ? 'list' : 'grid')}>{view === 'grid' ? 'List' : 'Covers'}</button>
           <button className="solid" onClick={onImport}>Import books</button>
         </div>
         {shown.length === 0 ? (
@@ -72,7 +75,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
             {books.length ? 'nothing in this view.' : 'Import an EPUB, PDF, or document to keep it in your library. Drop it here or press a; OmaReader saves its own copy.'}
           </Empty>
         ) : (
-          <div className="rows" role="listbox" aria-label="Books">
+          <div className={`rows ${view === 'grid' ? 'cover-grid' : ''}`} role="listbox" aria-label="Books">
             {shown.map((book, i) => (
               <button
                 key={book.id}
@@ -83,7 +86,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
                 onClick={() => setCursor(i)}
                 onDoubleClick={() => book.status === 'ready' && navigate(`read/${book.id}`)}
               >
-                <b>{book === selected ? '>' : ' '}</b>
+                {view === 'grid' && <Cover book={book} />}
                 <span className="row-title">{book.title}</span>
                 <span className="row-author">{book.author}</span>
                 <span className="row-format">{book.format}</span>
@@ -111,7 +114,7 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
         <Cover book={book} />
         <h3>{book.title}</h3>
         {book.author && <p className="preview-author">{book.author}</p>}
-        {book.status === 'failed' && <p className="error">ERR&gt; {book.error}</p>}
+        {book.status === 'failed' && <p className="error">{book.error}</p>}
         {book.status === 'processing' && <p className="hint">indexing…</p>}
         <dl>
           <dt>type</dt><dd>{book.format}</dd>

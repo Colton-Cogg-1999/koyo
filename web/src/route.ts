@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 
 export type Route =
   | { view: 'library'; collection?: string; favorites?: boolean }
-  | { view: 'read'; id: string; block: number | null }
+  | { view: 'read'; id: string; block: number | null; page: number | null }
   | { view: 'ask'; id: string }
   | { view: 'annotations' }
   | { view: 'audiobooks' }
@@ -17,7 +17,7 @@ function parse(hash: string): Route {
     case 'ask':
       return { view: 'ask', id };
     case 'read':
-      return { view: 'read', id, block: params.has('b') ? Number(params.get('b')) : null };
+      return { view: 'read', id, block: params.has('b') ? Number(params.get('b')) : null, page: params.has('p') ? Number(params.get('p')) : null };
     case 'annotations':
     case 'audiobooks':
     case 'notebook':

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, X, Pause } from 'lucide-react';
+import { CommandPalette } from './CommandPalette';
+import { editingTarget } from './preferences';
+import { player, usePlayer } from './audio';
 import { api, onServerEvent } from './api';
 import { AudioPane, WORKSPACES } from './LeftPanes';
 import { Reader } from './reader/Reader';
@@ -11,6 +14,8 @@ import { Annotations, Audiobooks, Notebook, Settings } from './views/Others';
 
 export function App() {
   const route = useRoute();
+  const [palette, setPalette] = useState(false);
+  const audio = usePlayer();
   const [books, reloadBooks] = useAsync<Book[]>(() => api.books(), []);
   const [collections, reloadCollections] = useAsync<Collection[]>(() => api.collections(), []);
   const [dragging, setDragging] = useState(false);
@@ -43,7 +48,11 @@ export function App() {
   useEffect(() => {
     const open = (event: Event) => setSearch({ book: (event as CustomEvent).detail?.book });
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).closest('input,textarea,select') || event.ctrlKey || event.metaKey || event.altKey) return;
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); setPalette((v) => !v); return; }
+      if (editingTarget(event.target)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearch({ book: route.view === 'read' ? route.id : undefined }); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') { event.preventDefault(); navigate('library'); return; }
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (event.key === '/') {
         event.preventDefault();
         setSearch({ book: route.view === 'read' ? route.id : undefined });
@@ -99,12 +108,13 @@ export function App() {
           <nav className="workspaces" aria-label="Workspaces">
             {WORKSPACES.map((space) => <button key={space.key} className={route.view === space.match ? 'on' : ''} aria-current={route.view === space.match ? 'page' : undefined} title={`${space.label} (${space.key})`} onClick={() => goWorkspace(space.path)}>{space.label}</button>)}
           </nav>
+          {audio.playing && route.view !== 'audiobooks' && <button className="ghost audio-indicator" title="Pause narration" onClick={() => player.toggle()}><Pause size={14} /> Audio playing</button>}
         </header>
       )}
       <main className="main">
         {route.view === 'library' && <Library books={books ?? []} collections={collections ?? []} filter={route} onChange={refresh} onImport={() => fileInput.current?.click()} />}
         {route.view === 'ask' && <AskBook key={route.id} id={route.id} />}
-        {route.view === 'read' && <Reader key={route.id} id={route.id} startBlock={route.block} focus={focus} setFocus={setFocus} />}
+        {route.view === 'read' && <Reader key={route.id} id={route.id} startBlock={route.block} startPage={route.page} focus={focus} setFocus={setFocus} />}
         {route.view === 'annotations' && <Annotations />}
         {route.view === 'audiobooks' && <div className="audio-workspace"><Audiobooks /><AudioPane fallbackBookId={latest?.id} /></div>}
         {route.view === 'notebook' && <Notebook />}
@@ -123,11 +133,12 @@ export function App() {
       />
       {dragging && (
         <div className="drop-veil">
-          <strong>&gt;&gt;&gt; drop to import</strong>
+          <strong>Drop books to import</strong>
           <span>epub pdf md docx html fb2 txt</span>
         </div>
       )}
       {search && <SearchSheet scope={search.book} onClose={() => setSearch(null)} />}
+      {palette && <CommandPalette reading={route.view === 'read'} onClose={() => setPalette(false)} onSearch={() => setSearch({ book: route.view === 'read' ? route.id : undefined })} onImport={() => fileInput.current?.click()} />}
       <Toasts />
     </div>
   );
@@ -157,7 +168,7 @@ function SearchSheet({ scope, onClose }: { scope?: string; onClose: () => void }
       <div className="search-sheet">
         <header>
           <Search size={16} />
-          <input autoFocus aria-label="Search" placeholder={wide ? 'grep all books' : 'grep this book'} value={query} onChange={(event) => setQuery(event.target.value)} />
+          <input autoFocus aria-label="Search" placeholder={wide ? 'Search all books' : 'Search this book'} value={query} onChange={(event) => setQuery(event.target.value)} />
           {scope && <button className="tab" onClick={() => setWide(!wide)}>{wide ? 'this book' : 'all books'}</button>}
           <button className="icon" title="Close" onClick={onClose}><X size={15} /></button>
         </header>

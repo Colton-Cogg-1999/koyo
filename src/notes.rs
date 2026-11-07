@@ -38,23 +38,24 @@ pub fn book_markdown(db: &Db, book: &str) -> Result<(String, String)> {
     let mut md = format!("---\ntitle: {}\nauthor: {}\nsource: OmaReader\n---\n\n# {title}\n\n", yaml(&title), yaml(&author));
 
     let mut stmt = conn.prepare(
-        "SELECT kind,color,block,page,quote,note FROM annotations WHERE book_id=?1 AND kind!='bookmark' ORDER BY page,block,created_at",
+        "SELECT kind,color,block,page,quote,note FROM annotations WHERE book_id=?1 ORDER BY page,block,created_at",
     )?;
     type Row = (String, String, u32, u32, String, String);
     let rows: Vec<Row> = stmt
         .query_map([book], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
         .collect::<Result<_, _>>()?;
     let mut last_chapter = String::new();
-    for (_, color, block, page, quote, note) in &rows {
+    for (kind, _color, block, page, quote, note) in &rows {
         let chapter = retrieval::chapter_of(&chapters, *block).map(|c| c.title.clone()).unwrap_or_default();
         if chapter != last_chapter && !chapter.is_empty() {
             md.push_str(&format!("## {chapter}\n\n"));
             last_chapter = chapter;
         }
+        if kind == "bookmark" { md.push_str("Bookmark\n\n"); }
         if !quote.is_empty() {
             md.push_str(&quote_lines(quote));
             md.push('\n');
-            let location = if *page > 0 { format!("p. {page}, {color}") } else { color.clone() };
+            let location = if *page > 0 { format!("p. {page}") } else { format!("Location {}", block + 1) };
             md.push_str(&format!(">\n> — {location}\n\n"));
         }
         if !note.is_empty() {

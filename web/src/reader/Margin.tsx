@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FileText, Plus, Trash2 } from 'lucide-react';
 import { api, urls } from '../api';
 import type { Annotation, BookDetail, Note } from '../types';
@@ -7,7 +7,7 @@ import type { NotePositions } from './ReflowView';
 
 export type MarginTab = 'margin' | 'index' | 'notebook';
 
-export function Margin({ book, annotations, positions, block, bookmarks, tab, setTab, go, reload, onEdit }: {
+export function Margin({ book, annotations, block, bookmarks, tab, setTab, go, reload, onEdit }: {
   book: BookDetail;
   annotations: Annotation[];
   positions: NotePositions;
@@ -23,64 +23,33 @@ export function Margin({ book, annotations, positions, block, bookmarks, tab, se
     <button key={name} className={`tab ${tab === name ? 'on' : ''}`} onClick={() => setTab(name)}>{name}</button>
   ));
   return (
-    <Pane title="NOTES" tools={tools} className="margin-pane">
-      {tab === 'margin' && <Refs book={book} annotations={annotations} positions={positions} onEdit={onEdit} />}
+    <Pane title="Notes" tools={tools} className="margin-pane">
+      {tab === 'margin' && <Refs book={book} annotations={annotations} block={block} go={go} onEdit={onEdit} />}
       {tab === 'index' && <Index book={book} block={block} bookmarks={bookmarks} go={go} />}
       {tab === 'notebook' && <NotesList book={book} annotations={annotations} reload={reload} go={go} />}
     </Pane>
   );
 }
 
-/** Notes float level with their passage, and a connector runs back to the text. */
-function Refs({ book, annotations, positions, onEdit }: {
-  book: BookDetail;
-  annotations: Annotation[];
-  positions: NotePositions;
+/** Chapter context is a stable location-ordered view of the shared annotation records. */
+function Refs({ book, annotations, block, go, onEdit }: {
+  book: BookDetail; annotations: Annotation[]; block: number;
+  go: (block: number, flash?: boolean) => void;
   onEdit: (annotation: Annotation, rect: DOMRect) => void;
 }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [height, setHeight] = useState(0);
-  const [top, setTop] = useState(0);
-  const [left, setLeft] = useState(0);
-
-  useLayoutEffect(() => {
-    const element = box.current;
-    if (!element) return;
-    const measure = () => {
-      const rect = element.getBoundingClientRect();
-      setTop(rect.top);
-      setLeft(rect.left);
-      setHeight(rect.height);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  const placed = annotations
-    .filter((a) => a.note && positions.has(a.id))
-    .map((a) => ({ note: a, y: positions.get(a.id)!.y - top, x: positions.get(a.id)!.x }))
-    .filter((p) => p.y > -24 && p.y < height - 30)
-    .sort((a, b) => a.y - b.y);
-
-  let floor = 0;
-  return (
-    <div className="refs" ref={box}>
-      {placed.map(({ note, y, x }) => {
-        const at = Math.max(y, floor);
-        floor = at + 22 + Math.ceil(note.note.length / 34) * 19 + 16;
-        const chapter = book.chapters.findLast((c) => c.start <= note.block)?.title;
-        return (
-          <button key={note.id} className={`ref ${note.color}`} style={{ top: at }} onClick={(event) => onEdit(note, event.currentTarget.getBoundingClientRect())}>
-            <span className="ref-line" style={{ width: Math.max(0, left + 22 - x), left: Math.min(0, x - left - 22) }} />
-            <span>&gt;&gt;&gt; [REF: {chapter ?? `p. ${note.page}`}] {note.note}</span>
-          </button>
-        );
-      })}
-      {placed.length === 0 && <p className="hint">select text to highlight it or add a note. notes appear here, level with the passage.</p>}
-    </div>
-  );
+  const chapter = book.chapters.findLast((c) => c.start <= block);
+  const items = annotations.filter((a) => !chapter || a.block >= chapter.start && a.block < chapter.end).sort((a,b) => a.block - b.block || a.created_at - b.created_at);
+  const nearest = items.reduce<Annotation | null>((best,a) => !best || Math.abs(a.block-block) < Math.abs(best.block-block) ? a : best, null);
+  return <div className="chapter-notes">
+    {items.map((note) => <div className={`chapter-note ${note.id === nearest?.id ? 'near' : ''}`} key={note.id}>
+      <button className="ref" onClick={() => go(note.block)}>
+        <small>{note.page ? `p. ${note.page}` : `Location ${note.block + 1}`}{note.kind === 'bookmark' ? ' · Bookmark' : note.note ? ' · Note' : ' · Highlight'}</small>
+        <span>{note.note || note.quote || 'Bookmark'}</span>
+      </button>
+      <button className="icon mark-edit" title="Edit annotation" aria-label="Edit annotation" onClick={(e) => onEdit(note,e.currentTarget.getBoundingClientRect())}>…</button>
+    </div>)}
+    {!items.length && <p className="hint">No notes in this chapter.</p>}
+  </div>;
 }
 
 function Index({ book, block, bookmarks, go }: { book: BookDetail; block: number; bookmarks: Annotation[]; go: (block: number, flash?: boolean) => void }) {
