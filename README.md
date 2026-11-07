@@ -80,7 +80,11 @@ Use **− / percentage / +** in the reader toolbar to zoom. EPUBs enlarge the te
 
 | Key | Action |
 | --- | --- |
-| `1`–`6` | Library, reader, marks, audio, notebook, settings |
+| `1`–`5` | Library, Read, Marks, Audio, Settings |
+| `Ctrl+Shift+P` | Command palette |
+| `Ctrl+F` / `Ctrl+L` | Search / Library |
+| `Ctrl+D` / `Ctrl+B` | Bookmark / sidebar |
+| `Ctrl+J` | Focus question input |
 | `/` | Search |
 | `Space`, `PageDown`, `→` | Read forward |
 | `Shift+Space`, `PageUp`, `←` | Read backward |
@@ -107,7 +111,7 @@ OMAREADER_DATA_DIR=~/Books/OmaReader omareader
 
 Backups include books, notes, conversations, reading positions, and generated audio, with checksums verified on restore. Voice models can be downloaded again; browser profiles and session credentials are excluded. Restore refuses to overwrite an existing directory. Notes saved in the database get fresh Markdown mirrors in the restored library. Close older versions too: the backup lock only coordinates versions that implement it.
 
- Unsaved notebook drafts are also kept in browser storage until a successful save, so a failed request does not discard your edits. Markdown mirrors are exports: editing one externally does not write changes back into the notebook database.
+Unsaved notebook drafts are also kept in browser storage until a successful save, so a failed request does not discard your edits. Markdown mirrors are exports: editing one externally does not write changes back into the notebook database.
 
 ```sh
 omareader                  # open the desktop reader, once installed
@@ -166,3 +170,15 @@ Both narration/export and live Claude Code/Codex answers were exercised during t
 Found a broken book, an inaccessible control, or a better way to keep notes portable? Open an issue or send a patch. A small reproducible example is more useful than a promise that something “should work.” Please use a shareable sample instead of uploading a private book or your library database.
 
 The source is MIT licensed. Fork it. Fix it. Make it useful to someone who is being kept out. Keep the door open.
+
+## A quieter place to read
+
+The five workspaces are Library, Read, Marks, Audio, and Settings. Reading starts with Literata, a comfortable column, and warm dark surfaces. IBM Plex Mono handles the controls. Text and page settings live behind the small typography button; the footer uses document locations for EPUBs and real page numbers for PDFs.
+
+Drag the sidebar divider or use its arrow keys to resize it. Notes and chat can each collapse, and their dimensions are remembered. A narrow window puts the sidebar over the book with a Back to reading action. The command palette is available with Ctrl+Shift+P.
+
+Select a passage to Highlight, Note, or Ask. Notes beside the chapter and the Marks archive use the same annotation records. Marks searches quotations, commentary, book titles, and chapter names; Markdown export includes bookmarks too. Existing standalone notebooks are under Saved writing so older work stays accessible.
+
+Ask attaches a passage without sending anything. The default conversation scope is the current chapter; you can also choose selected text, visible passages, a particular chapter, or retrieval across the book. The request captures its scope and source locations when sent. Later navigation cannot change it. Long chapters and book-wide retrieval disclose partial coverage. Only citation numbers backed by supplied excerpts are linked, and those links return to stable block locations. A citation is still something to check, not a guarantee of the model's interpretation.
+
+Panel preferences and unsent drafts use local browser storage; saved books, marks, settings, conversation context, and citations use the existing local database. Browser drafts are not included in library backups. PDF page questions cover the current physical page, and paragraph boundaries determine visible EPUB context. There is no optional Vim mode or paginated EPUB layout yet.

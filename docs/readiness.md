@@ -48,3 +48,19 @@ New coverage:
 - An 820×1180 browser viewport retains library actions, chapter questions, reading space, and closable audio/side panels. Actual Surface hardware, touch selection, pen input, suspend/resume, and Nook execution remain unverified.
 
 The README stays text-only. Generated fixtures and their screenshots are test material, not application marketing. Podcasts, multi-book conversations, local-model adapters, automatic synchronization, and a graphical library-migration wizard are still future work.
+
+## Reader-first interface review — November 7, 2026
+
+The existing React/Rust application now uses semantic olive/warm-paper tokens, bundled Literata and IBM Plex Mono, and five primary destinations. `ReaderSidebar`, `ReadingProgress`, `TypePanel`, and `CommandPalette` hold reusable layout and interaction behavior; existing EPUB/PDF renderers and provider adapters remain in place.
+
+Notes and Marks query the same `annotations` table. A nonempty note is commentary on that record; bookmarks remain a distinct kind. EPUB anchors retain offsets and quote recovery, PDF highlights retain normalized rectangles. Markdown export now includes bookmarks and an all-book download. Legacy standalone writing remains accessible rather than being migrated destructively. Saving an AI answer creates a source-located mark.
+
+Chat defaults to chapter scope. An attached quotation is independent of that scope and is validated against its source blocks. Each request snapshots its locations, selection, chapter and scope; these and the partial-coverage flag persist with the messages. Only citation numbers present in the supplied source list become links. New conversations retain book association; unsent question and annotation drafts remain local. Streaming follows the bottom only while the reader remains there.
+
+Validation includes Rust tests for cross-chapter attachments, bounded context, and migration of preexisting conversations; browser tests for chapter notes/Marks consistency, export, resizing, collapse, palette, drafts, PDF/EPUB anchors, missing providers and citations. Live Claude Code and Codex checks passed for page, selection, explicit chapter and unsupported-fact questions. Kokoro synthesis was not rerun for this interface revision; its previous real synthesis/export review remains above, and Audio routing/request controls passed again.
+
+Screenshots of actual browser-rendered test content were inspected at 1600×1000, 1366×768 and 700×1000, including the narrow sidebar. Browser scaling checks use 125% and 150% device-scale factors with correspondingly smaller CSS viewports; they are not physical Surface/Nook tests. Screenshot artifacts stay outside the repository. TypeScript checking and production builds pass. Clippy completes with four existing style warnings in provider parsing, ingestion, chat and speech text handling.
+
+Remaining limits: book-wide BM25 retrieval is excerpt-based; PDF page scope uses the physical page and EPUB viewport context uses block boundaries. Provider adapters remain Claude Code/Codex CLI, with credentials managed there. No new API-key/local-model adapter, podcast generation, EPUB pagination mode, Vim mode, cross-device sync or OCR is claimed. Drafts in browser storage are outside offline library backups. Screen-reader and touch/pen testing on physical devices remain outstanding.
+
+Final local results: **21 Rust tests passed**, **23 routine browser tests passed** (three opt-in tests skipped). The separate live-provider run passed **36 checks**, with only Kokoro synthesis skipped. TypeScript/Vite and optimized release builds succeeded. A mid-book resize regression verifies EPUB block and PDF page preservation. No personal books, library databases, credentials, voice models or reference images were added to Git.
