@@ -529,9 +529,67 @@ test('portrait layout keeps book actions, reading, and question controls accessi
   await page.waitForSelector('.side .agent');
   await page.click('.side-close');
   assert.equal(await page.locator('.side').count(), 0);
-  await page.click('.mobile-audio');
-  assert.ok(await page.locator('.left .audio').isVisible());
-  await page.click('.mobile-audio');
+  await page.click('[title="AUDIO (4)"]');
+  await page.waitForSelector('.audio-workspace .audio');
+  await page.click('[title="READ (2)"]');
+  await page.waitForSelector('.prose p');
+  assert.equal(await page.locator('.audio').count(), 0);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   await page.setViewportSize({ width: 1600, height: 900 });
+});
+
+
+test('minimal reader has persistent zoom and moves narration into the Audio tab', async () => {
+  // Reset this temporary fixture even when the optional synthesis test ran first.
+  await api(`/api/books/${epub}/audio`, 'DELETE');
+  await api('/api/settings', 'PUT', { reader: { font: 'mono', size: 16, zoom: 1 } });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.reload();
+  await page.waitForSelector('.prose p');
+  assert.equal(await page.locator('.left, .audio').count(), 0);
+  const positions = await page.evaluate(() => {
+    const rect = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width }; };
+    return { reader: rect('.volume'), notes: rect('.margin-pane'), chat: rect('.agent') };
+  });
+  assert.ok(positions.notes.x > positions.reader.x + positions.reader.width - 2);
+  assert.ok(positions.chat.y > positions.notes.y);
+  assert.equal(positions.notes.x, positions.chat.x);
+  await page.click('[aria-label="Zoom in"]');
+  await eventually(async () => (await api('/api/settings')).reader.size === 18);
+  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), '18px');
+  await page.reload();
+  await page.waitForSelector('.prose p');
+  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), '18px');
+  if (process.env.OMAREADER_LAYOUT_SCREENSHOT) await page.screenshot({ path: process.env.OMAREADER_LAYOUT_SCREENSHOT });
+  await page.click('[aria-label="Reset zoom"]');
+  await eventually(async () => (await api('/api/settings')).reader.size === 16);
+  await page.route('**/api/tts', (route) => route.fulfill({ json: { installed: true, ffmpeg: true, default_voice: 'af_heart', voices: [{ id: 'af_heart', name: 'Heart', accent: 'American', gender: 'Female' }] } }));
+  let narrated;
+  await page.route(`**/api/books/${epub}/audio`, (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    narrated = route.request().postDataJSON();
+    return route.fulfill({ json: { status: 'generating', cursor: 0, tracks: [] } });
+  });
+  await page.click('[title="AUDIO (4)"]');
+  await page.waitForSelector('.audio-workspace .audio');
+  await page.waitForTimeout(400);
+  assert.equal(await page.locator('.crash').count(), 0, (await page.textContent('body')));
+  await page.click('button:has-text("start narrating")');
+  await eventually(() => narrated);
+  assert.equal(narrated.voice, 'af_heart');
+  assert.ok(Number.isInteger(narrated.block));
+  await page.unroute(`**/api/books/${epub}/audio`);
+  await page.unroute('**/api/tts');
+  await page.click('[title="READ (2)"]');
+  await page.waitForSelector('.prose p');
+  assert.equal(await page.locator('.audio').count(), 0);
+  const id = await upload('mixed-pages.pdf');
+  await page.goto(`${ORIGIN}/#/read/${id}?b=0`);
+  await page.waitForSelector('.pdf-page canvas');
+  const before = await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width);
+  await page.click('[aria-label="Zoom in"]');
+  await eventually(async () => (await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width)) > before * 1.05);
+  await page.click('[aria-label="Zoom out"]');
+  await eventually(async () => Math.abs((await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width)) - before) < 2);
+  assert.deepEqual(errors, []);
 });

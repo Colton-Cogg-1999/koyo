@@ -41,7 +41,7 @@ cd omareader
 
 Check `node --version`: the frontend toolchain expects Node 26, also specified in `mise.toml`. The build installs locked JavaScript dependencies, builds the interface, then embeds it into the release binary. Initial compilation may download the sherpa-onnx native runtime.
 
-Import a book using the library's file picker or drag and drop. Open it from the library. Select text to highlight it or add a note. The narration pane offers a one-time voice download of several hundred megabytes; after that, speech generation runs locally.
+Import a book using the library's file picker or drag and drop. Open it from the library. Select text to highlight it or add a note. The **Audio** tab offers a one-time voice download of several hundred megabytes; after that, speech generation runs locally.
 
 For a per-user install with a desktop launcher (no sudo):
 
@@ -69,6 +69,12 @@ While reading, **Visible passages** uses the paragraphs intersecting the reading
 Long chapters and book overviews may be sampled. Chapter questions also retrieve matching passages from within that chapter. This isn't a claim that the model has read every word. Answers are instructed to stick to supplied evidence and say when it isn't enough. Follow the numbered citations to check, and save useful answers to your notebook with their source references.
 
 Highlights store text locations rather than screen pixels for EPUBs, and page-relative rectangles for PDFs. EPUB quotation checks catch stale offsets; a unique match can recover a shifted passage. If a safe match isn't possible, the reader tells you instead of highlighting unrelated text. That is not automatic migration between different editions of a book.
+
+## A quieter reading layout
+
+The book gets the main reading surface, with notes at the top right and chat below. Library, marks, audio, notebooks, and settings live in the top tabs. Audiobook controls only appear in **Audio**; switching back to **Read** returns to your book.
+
+Use **− / percentage / +** in the reader toolbar to zoom. EPUBs enlarge the text and reflow; PDFs enlarge the original page. Click the percentage to reset. The setting is saved, and the existing text menu still offers fonts, line spacing, and paper colors. On narrow screens, the side-panes button opens notes and chat when needed.
 
 ## Keyboard controls
 
