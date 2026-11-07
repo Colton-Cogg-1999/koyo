@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Maximize2, Minimize2 } from 'lucide-react';
-import { api, ask } from '../api';
+import { api, ask, type AskBody } from '../api';
 import { renderMarkdown } from '../markdown';
 import type { Location } from '../session';
 import type { BookDetail, ChatSummary, Citation, Message, Providers } from '../types';
@@ -39,13 +39,17 @@ function Answer({ message, go, onSave }: { message: Message; go: (block: number)
   );
 }
 
-export function Agent({ book, location, seed, go }: { book: BookDetail; location: Location; seed: { selection: string; question?: string; nonce: number } | null; go: (block: number) => void }) {
+export interface AskSeed { selection: string; block: number; endBlock: number; question?: string; nonce: number }
+
+export function Agent({ book, location, seed, go }: { book: BookDetail; location?: Location; seed: AskSeed | null; go: (block: number) => void }) {
   const [providers, , setProviders] = useAsync<Providers>(() => api.providers(), []);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chat, setChat] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [selection, setSelection] = useState<string | null>(null);
+  const [selection, setSelection] = useState<AskSeed | null>(null);
+  const [scope, setScope] = useState<AskBody['scope']>(location ? 'page' : 'search');
+  const [chapter, setChapter] = useState<string>('current');
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
   const [large, setLarge] = useState(false);
@@ -81,15 +85,19 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const send = async (question: string, options: { label?: string; scope?: 'chapter' | 'book'; selection?: string | null } = {}) => {
+  useEffect(() => () => abort.current?.abort(), []);
+
+  const send = async (question: string, options: { label?: string; scope?: AskBody['scope']; selection?: AskSeed | null } = {}) => {
     const text = question.trim();
     if (!text || busy) return;
     const quoted = options.selection !== undefined ? options.selection : selection;
+    const chosenScope = options.scope ?? scope;
+    const chapterId = chapter === 'current' ? book.chapters.findLast((c) => c.start <= (location?.block ?? 0))?.idx : Number(chapter);
     setInput('');
-    setSelection(null);
     setBusy(true);
     const controller = new AbortController();
     abort.current = controller;
+    let appended = false;
     try {
       let id = chat;
       if (!id) {
@@ -100,15 +108,17 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
       }
       const user: Message = { role: 'user', content: options.label ?? text, citations: [] };
       setMessages((list) => [...list, user, { role: 'assistant', content: '', citations: [] }]);
+      appended = true;
       const update = (change: (m: Message) => Message) => setMessages((list) => [...list.slice(0, -1), change(list[list.length - 1])]);
-      await ask(id, { question: text, label: options.label, selection: quoted ?? undefined, block: location.block, scope: options.scope }, (event) => {
+      await ask(id, { question: text, label: options.label, selection: chosenScope === 'selection' ? quoted?.selection : undefined, block: chosenScope === 'selection' ? quoted?.block : (chosenScope === 'page' ? location?.visibleStart ?? location?.block : location?.block), end_block: chosenScope === 'selection' ? quoted?.endBlock : location?.endBlock, page: chosenScope === 'page' && book.format === 'pdf' ? location?.page : undefined, chapter: chosenScope === 'chapter' ? chapterId : undefined, scope: chosenScope }, (event) => {
         if (event.type === 'citations') update((m) => ({ ...m, citations: event.citations }));
         if (event.type === 'delta') update((m) => ({ ...m, content: m.content + event.text }));
         if (event.type === 'error') update((m) => ({ ...m, error: event.message }));
       }, controller.signal);
     } catch (error) {
       if ((error as Error).name !== 'AbortError') {
-        setMessages((list) => [...list.slice(0, -1), { ...list[list.length - 1], error: (error as Error).message }]);
+        if (appended) setMessages((list) => [...list.slice(0, -1), { ...list[list.length - 1], error: (error as Error).message }]);
+        else failure(error);
       }
     } finally {
       setBusy(false);
@@ -137,9 +147,12 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
   useEffect(() => {
     if (!seed || handled.current === seed.nonce) return;
     handled.current = seed.nonce;
-    if (seed.question) void send(seed.question, { selection: seed.selection, label: `${seed.question} "${seed.selection.slice(0, 120)}"` });
+    setSelection(seed);
+    setScope('selection');
+    if (seed.question) void send(seed.question, { selection: seed, scope: 'selection', label: `${seed.question} "${seed.selection.slice(0, 120)}"` });
     else {
-      setSelection(seed.selection);
+      setSelection(seed);
+      setScope('selection');
       field.current?.focus();
     }
   }, [seed]);
@@ -173,7 +186,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
         <>
           <button className="tab" onClick={() => setMenu(!menu)}>model</button>
           {chats.length > 1 && (
-            <select aria-label="Conversation" value={chat ?? ''} onChange={(event) => setChat(event.target.value)}>
+            <select disabled={busy} aria-label="Conversation" value={chat ?? ''} onChange={(event) => setChat(event.target.value)}>
               {chats.map((c) => <option key={c.id} value={c.id}>{c.title || 'new'}</option>)}
             </select>
           )}
@@ -193,6 +206,23 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
           ))}
         </div>
       )}
+      <div className="question-scope">
+        <label>Ask about
+          <select aria-label="Question scope" disabled={busy} value={scope} onChange={(event) => setScope(event.target.value as AskBody['scope'])}>
+            {location && <option value="page">{book.format === 'pdf' ? `Current page (${location.page})` : 'Visible passages'}</option>}
+            {selection && <option value="selection">Selected text</option>}
+            <option value="chapter">A chapter</option>
+            <option value="search">Search this book</option>
+            <option value="book">Book overview (sampled)</option>
+          </select>
+        </label>
+        {scope === 'chapter' && <select aria-label="Question chapter" disabled={busy} value={chapter} onChange={(event) => setChapter(event.target.value)}>
+          <option value="current">{location ? 'Current chapter' : 'First chapter'}</option>
+          {book.chapters.map((c) => <option key={c.idx} value={c.idx}>{c.title}</option>)}
+        </select>}
+        <span className="hint">Answers use excerpts from {book.title}. Follow citations to check them.</span>
+        <button className="tab" disabled={busy} onClick={() => { setChat(null); setMessages([]); }}>New conversation</button>
+      </div>
       <div className="chat-log" ref={log}>
         {providers && usable.length === 0 && (
           <div className="answer">
@@ -224,7 +254,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
         </div>
       )}
       {selection && (
-        <div className="quoted"><span>"{selection.slice(0, 130)}{selection.length > 130 ? '…' : ''}"</span><button className="icon" title="Remove" onClick={() => setSelection(null)}>×</button></div>
+        <div className="quoted"><span>"{selection.selection.slice(0, 130)}{selection.selection.length > 130 ? '…' : ''}"</span><button className="icon" title="Remove" onClick={() => { setSelection(null); if (scope === 'selection') setScope(location ? 'page' : 'search'); }}>×</button></div>
       )}
       <form className="ask" onSubmit={(event) => { event.preventDefault(); submit(); }}>
         <span>USER_&gt;</span>
@@ -243,6 +273,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
             if (event.key === 'Escape') field.current?.blur();
           }}
         />
+        {!busy && <button type="submit" className="tab" disabled={!input.trim() || usable.length === 0}>Ask</button>}
         {busy && <button type="button" className="tab" title="Stop" onClick={() => abort.current?.abort()}>^C</button>}
       </form>
     </Pane>

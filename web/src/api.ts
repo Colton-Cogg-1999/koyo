@@ -100,7 +100,10 @@ export interface AskBody {
   label?: string;
   selection?: string;
   block?: number;
-  scope?: 'chapter' | 'book';
+  scope?: 'page' | 'selection' | 'chapter' | 'book' | 'search';
+  end_block?: number;
+  page?: number;
+  chapter?: number;
 }
 
 export type AskEvent =

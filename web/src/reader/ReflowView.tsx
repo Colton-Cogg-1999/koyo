@@ -7,6 +7,7 @@ import { annotationAt, anchorFromSelection, clearPaint, paintAnnotations, paintR
 export interface Picked {
   anchor: TextAnchor | { kind: 'pdf'; rects: [number, number, number, number, number][] };
   quote: string;
+  endBlock?: number;
   rect: DOMRect;
   block: number;
   page: number;
@@ -29,7 +30,7 @@ export interface ViewProps {
   annotations: Annotation[];
   jump: Jump;
   mark: { block: number; start: number; end: number } | null;
-  onLocation: (block: number, fraction: number, page: number, ratio: number) => void;
+  onLocation: (block: number, fraction: number, page: number, ratio: number, endBlock?: number, visibleStart?: number) => void;
   onPick: (picked: Picked | null) => void;
   onHit: (annotation: Annotation, rect: DOMRect) => void;
   onJump: (block: number) => void;
@@ -132,7 +133,9 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     const fraction = rect.height ? Math.max(0, (top - rect.top) / rect.height) : 0;
     const seq = Number(element.dataset.b);
     const last = book.sections.at(-1)?.last_block ?? 1;
-    onLocation(seq, fraction, 0, seq / Math.max(1, last));
+    const bottom = box.getBoundingClientRect().bottom;
+    const visible = list.filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.getBoundingClientRect().top && r.top < bottom; });
+    onLocation(seq, fraction, 0, seq / Math.max(1, last), Number(visible.at(-1)?.dataset.b ?? seq), Number(visible[0]?.dataset.b ?? seq));
     measureNotes();
   }, [book.sections, onLocation]);
 

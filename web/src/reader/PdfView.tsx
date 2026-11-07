@@ -291,7 +291,8 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
       const [page, , top] = merged[0];
       const blocks = await blocksOn(page).catch(() => []);
       const near = blocks.find((b) => (b.y ?? 0) + (b.h ?? 0) >= top) ?? blocks[0];
-      onPick({ anchor: { kind: 'pdf', rects: merged }, quote, rect: range.getBoundingClientRect(), block: near?.seq ?? 0, page });
+      const lastBlocks = await blocksOn(merged.at(-1)![0]).catch(() => []);
+      onPick({ endBlock: lastBlocks.at(-1)?.seq ?? near?.seq ?? 0, anchor: { kind: 'pdf', rects: merged }, quote, rect: range.getBoundingClientRect(), block: near?.seq ?? 0, page });
     }, 0);
   };
 

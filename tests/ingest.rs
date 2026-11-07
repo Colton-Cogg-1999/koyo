@@ -151,3 +151,28 @@ fn loose_notes_are_mirrored_and_multiline_metadata_is_escaped() {
     assert!(std::fs::read_to_string(paths.notes.join("notebook.md")).unwrap().contains("Keep this."));
     assert!(!paths.notes.join("notebook.md.tmp").exists());
 }
+
+#[test]
+fn question_scopes_exclude_other_chapters_and_validate_selections() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("scopes.md");
+    std::fs::write(&file, "# Harbor\n\nThe harbor signal is amber, and its keeper is Mara.\n\n# Observatory\n\nThe observatory signal is violet, and its keeper is Ivo.\n").unwrap();
+    let id = ingest::import_path(&db, &paths, &file).unwrap();
+    let chapters = retrieval::chapters(&db.conn(), &id).unwrap();
+    let build = |r| retrieval::build(&db, &id, &r, &[]).unwrap();
+    let chapter = build(retrieval::AskRequest { question: "Who keeps the signal?".into(), scope: Some("chapter".into()), chapter: Some(1), block: Some(0), ..Default::default() });
+    assert!(chapter.citations.iter().any(|c| c.quote.contains("Ivo")));
+    assert!(chapter.citations.iter().all(|c| c.block >= chapters[1].start && !c.quote.contains("Mara")));
+    let page = build(retrieval::AskRequest { question: "What is the signal?".into(), scope: Some("page".into()), block: Some(1), end_block: Some(1), ..Default::default() });
+    assert_eq!(page.citations.len(), 1);
+    assert!(page.citations[0].quote.contains("amber"));
+    assert!(!page.prompt.contains("violet"));
+    let mut request = retrieval::AskRequest { question: "Explain this".into(), scope: Some("selection".into()), block: Some(1), selection: Some("its keeper is Mara".into()), ..Default::default() };
+    let selection = build(request.clone());
+    assert_eq!(selection.citations[0].quote, "its keeper is Mara");
+    request.selection = Some("its keeper is Ivo".into());
+    assert!(retrieval::build(&db, &id, &request, &[]).is_err());
+    request.scope = Some("chapter".into());
+    request.chapter = Some(99);
+    assert!(retrieval::build(&db, &id, &request, &[]).is_err());
+}

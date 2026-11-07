@@ -41,7 +41,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
   const [typeOpen, setTypeOpen] = useState(false);
   const [sideOpen, setSideOpen] = useState(true);
   const [tab, setTab] = useState<MarginTab>('margin');
-  const [askSeed, setAskSeed] = useState<{ selection: string; question?: string; nonce: number } | null>(null);
+  const [askSeed, setAskSeed] = useState<{ selection: string; block: number; endBlock: number; question?: string; nonce: number } | null>(null);
   const [notePositions, setNotePositions] = useState<NotePositions>(new Map());
   const audio = usePlayer();
   const saveTimer = useRef(0);
@@ -80,8 +80,8 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
     return () => { window.removeEventListener('pagehide', flushPosition); flushPosition(); };
   }, [flushPosition]);
 
-  const onLocation = useCallback((block: number, fraction: number, page: number, ratio: number) => {
-    setLocation({ block, fraction, page, ratio });
+  const onLocation = useCallback((block: number, fraction: number, page: number, ratio: number, endBlock?: number, visibleStart?: number) => {
+    setLocation({ block, fraction, page, ratio, endBlock, visibleStart });
     pendingPosition.current = { block, fraction, page, ratio };
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(flushPosition, 700);
@@ -134,7 +134,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
 
   const askAbout = (question?: string) => {
     if (!picked) return;
-    setAskSeed({ selection: picked.quote, question, nonce: ++nonce.current });
+    setAskSeed({ selection: picked.quote, block: picked.block, endBlock: picked.anchor.kind === 'text' ? picked.anchor.endBlock : (picked.endBlock ?? picked.block), question, nonce: ++nonce.current });
     setSideOpen(true);
     window.getSelection()?.removeAllRanges();
     setPicked(null);

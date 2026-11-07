@@ -6,7 +6,7 @@ import { Reader } from './reader/Reader';
 import { navigate, useRoute } from './route';
 import type { Book, Collection, SearchHit } from './types';
 import { failure, toast, Toasts, useAsync } from './ui';
-import { Library } from './views/Library';
+import { AskBook, Library } from './views/Library';
 import { Annotations, Audiobooks, Notebook, Settings } from './views/Others';
 
 export function App() {
@@ -99,6 +99,7 @@ export function App() {
       )}
       <main className="main">
         {route.view === 'library' && <Library books={books ?? []} collections={collections ?? []} filter={route} onChange={refresh} onImport={() => fileInput.current?.click()} />}
+        {route.view === 'ask' && <AskBook key={route.id} id={route.id} />}
         {route.view === 'read' && <Reader key={route.id} id={route.id} startBlock={route.block} focus={focus} setFocus={setFocus} />}
         {route.view === 'annotations' && <Annotations />}
         {route.view === 'audiobooks' && <Audiobooks />}

@@ -102,7 +102,7 @@ async fn ask(State(state): State<AppState>, Path(chat): Path<String>, Json(body)
             .map(|p| p.id.to_string()).ok_or_else(|| bad_request("Sign in to Claude Code or Codex before asking a question."))?,
     };
     let model = state.db.setting_str("ai_model");
-    let prompt = retrieval::build(&state.db, &book, &body.request, &history)?;
+    let prompt = retrieval::build(&state.db, &book, &body.request, &history).map_err(|e| bad_request(&e.to_string()))?;
     let citations = prompt.citations.clone();
     let shown = body.label.clone().unwrap_or_else(|| question.clone());
     {

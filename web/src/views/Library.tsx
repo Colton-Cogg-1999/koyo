@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, urls } from '../api';
+import { Agent } from '../reader/Agent';
 import { navigate } from '../route';
 import type { Book, Collection } from '../types';
 import { bytes, Cover, Empty, failure, Gauge, Pane, toast, useAsync, when } from '../ui';
@@ -125,6 +126,7 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
         {book.description && <p className="preview-text">{book.description.slice(0, 280)}</p>}
         <div className="preview-actions">
           <button className="solid" disabled={book.status !== 'ready'} onClick={() => navigate(`read/${book.id}`)}>open</button>
+          <button className="ghost" disabled={book.status !== 'ready'} onClick={() => navigate(`ask/${book.id}`)}>Ask this book</button>
           <a className="ghost" href={urls.file(book.id)} download={book.file_name}>Export original</a>
           <button className="ghost" onClick={() => void update({ favorite: !book.favorite })}>{book.favorite ? 'unstar' : 'star'}</button>
           <button className="ghost danger" onClick={() => {
@@ -151,4 +153,12 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
       </div>
     </Pane>
   );
+}
+
+export function AskBook({ id }: { id: string }) {
+  const [book] = useAsync(() => api.book(id), [id]);
+  return <div className="study">
+    <div className="study-title"><button className="ghost" onClick={() => navigate('library')}>Back to library</button><h2>{book?.title ?? 'Loading book…'}</h2></div>
+    {book && <Agent key={book.id} book={book} seed={null} go={(block) => navigate(`read/${book.id}?b=${block}`)} />}
+  </div>;
 }

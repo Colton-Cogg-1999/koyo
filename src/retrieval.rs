@@ -3,7 +3,7 @@
 //! whatever the reader is looking at. Only the selected excerpts leave the machine.
 
 use crate::db::Db;
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -106,7 +106,7 @@ pub fn search(db: &Db, book: Option<&str>, query: &str, limit: u32) -> Result<Ve
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct AskRequest {
     pub question: String,
     #[serde(default)]
@@ -114,7 +114,15 @@ pub struct AskRequest {
     /// The block at the top of the reader, used for "this chapter" questions.
     #[serde(default)]
     pub block: Option<u32>,
-    /// `chapter` includes the current chapter, `book` samples the whole book.
+    /// Inclusive final visible/selected block for reflowable documents.
+    #[serde(default)]
+    pub end_block: Option<u32>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    /// Explicit outline chapter; independent of the reader's current position.
+    #[serde(default)]
+    pub chapter: Option<u32>,
+    /// page, selection, chapter, book (sampled overview), or search.
     #[serde(default)]
     pub scope: Option<String>,
 }
@@ -194,19 +202,17 @@ fn sampled(rows: Vec<Row>, budget: usize) -> Vec<Row> {
     if total <= budget {
         return rows;
     }
-    let keep = budget as f64 / total as f64;
-    let mut debt = 0.0;
-    rows.into_iter()
-        .filter(|_| {
-            debt += keep;
-            if debt >= 1.0 {
-                debt -= 1.0;
-                true
-            } else {
-                false
-            }
-        })
-        .collect()
+    if budget == 0 || rows.is_empty() { return Vec::new(); }
+    // Evenly distributed excerpts, with a hard UTF-8-safe byte budget. A single
+    // enormous paragraph must not disappear or consume the entire context window.
+    let count = rows.len().min((budget / 600).max(1));
+    let per_row = budget / count;
+    (0..count).map(|i| {
+        let row = &rows[i * rows.len() / count];
+        let mut end = row.text.len().min(per_row);
+        while !row.text.is_char_boundary(end) { end -= 1; }
+        Row { seq: row.seq, page: row.page, text: row.text[..end].to_string() }
+    }).collect()
 }
 
 fn add_search_hits(b: &mut Builder, conn: &Connection, book: &str, query: &str) -> Result<()> {
@@ -242,7 +248,8 @@ pub fn system_prompt() -> String {
 
 How to answer:
 - Ground the answer in the numbered excerpts inside <sources>. Put a citation like [3] directly after every claim that comes from an excerpt. Use only numbers that exist.
-- If the excerpts do not contain the answer, say so plainly. You may then add outside knowledge, and you must label it as outside the book.
+- Answer only from the supplied excerpts. If they do not contain the answer, say so plainly; do not fill gaps with outside knowledge. Excerpts may be incomplete, so never claim to have read the whole book.
+- The requested scope limits the answer. Prior conversation is not evidence, and its citation numbers do not apply to the current excerpts.
 - Be direct and write in plain prose. Skip openers like \"Great question\". Use short paragraphs, and use Markdown lists only when the content is a list.
 - Quote sparingly, and never reproduce long passages.
 
@@ -256,18 +263,53 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
         conn.query_row("SELECT title,author FROM books WHERE id=?1", [book], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let chapter_list = chapters(&conn, book)?;
     let mut b = Builder { chapters: chapter_list.clone(), citations: Vec::new(), sources: String::new() };
-    let current = request.block.and_then(|block| chapter_of(&chapter_list, block)).cloned();
+    let current = if let Some(idx) = request.chapter {
+        Some(chapter_list.iter().find(|c| c.idx == idx).context("That chapter does not exist.")?.clone())
+    } else {
+        request.block.and_then(|block| chapter_of(&chapter_list, block)).cloned()
+    };
+    let scope = request.scope.as_deref().unwrap_or("search");
+    if !matches!(scope, "page" | "selection" | "chapter" | "book" | "search") {
+        bail!("Unknown question scope.");
+    }
 
-    match request.scope.as_deref() {
-        Some("chapter") => {
-            if let Some(chapter) = &current {
+    match scope {
+        "page" => {
+            let rows = if let Some(page) = request.page.filter(|p| *p > 0) {
+                let mut stmt = conn.prepare("SELECT seq,page,text FROM blocks WHERE book_id=?1 AND page=?2 ORDER BY seq")?;
+                let rows = stmt.query_map(params![book, page], |r| Ok(Row { seq: r.get(0)?, page: r.get(1)?, text: r.get(2)? }))?;
+                rows.collect::<Result<Vec<_>, _>>()?
+            } else {
+                let start = request.block.context("Open a page first.")?;
+                let end = request.end_block.context("The visible passage range is missing.")?;
+                if end < start { bail!("Invalid visible passage range."); }
+                range(&conn, book, start, end.saturating_add(1))?
+            };
+            b.add_rows(&sampled(rows, CHAPTER_BUDGET), 1400);
+        }
+        "selection" => {
+            let selected = request.selection.as_deref().filter(|s| !s.trim().is_empty()).context("Select a passage first.")?;
+            let start = request.block.context("The selection location is missing.")?;
+            let end = request.end_block.unwrap_or(start);
+            if end < start { bail!("Invalid selection range."); }
+            let rows = range(&conn, book, start, end.saturating_add(1))?;
+            let normalize = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+            let source = rows.iter().map(|r| r.text.as_str()).collect::<Vec<_>>().join(" ");
+            if !normalize(&source).contains(&normalize(selected)) {
+                bail!("The selected text could not be matched to this book. Please select it again.");
+            }
+            b.add(start, rows.first().map(|r| r.page).unwrap_or(0), selected);
+        }
+        "chapter" => {
+            let chapter = current.as_ref().context("Choose a chapter first.")?;
+            {
                 let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, CHAPTER_BUDGET);
                 b.add_rows(&rows, 1400);
             }
         }
-        Some("book") => {
+        "book" => {
             let spoken: Vec<&Chapter> = chapter_list.iter().filter(|c| !c.front).collect();
-            let per_chapter = (CHAPTER_BUDGET / spoken.len().max(1)).clamp(500, 6000);
+            let per_chapter = (CHAPTER_BUDGET / spoken.len().max(1)).min(6000);
             for chapter in spoken {
                 let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, per_chapter);
                 b.add_rows(&rows, 1400);
@@ -291,7 +333,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
         }
     }
 
-    let mut prompt = format!("<book>\nTitle: {title}\n");
+    let mut prompt = format!("Requested scope: {scope}. Only the numbered excerpts below are evidence. Long sources may be sampled.\n<book>\nTitle: {title}\n");
     if !author.is_empty() {
         prompt.push_str(&format!("Author: {author}\n"));
     }
@@ -300,7 +342,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
         prompt.push_str(&format!("- {}\n", chapter.title));
     }
     if let Some(chapter) = &current {
-        prompt.push_str(&format!("The reader is currently in: {}\n", chapter.title));
+        prompt.push_str(&format!("Chapter in context: {}\n", chapter.title));
     }
     if let Some(selection) = request.selection.as_deref().filter(|s| !s.trim().is_empty()) {
         prompt.push_str(&format!("\nThe reader selected this text:\n{selection}\n"));

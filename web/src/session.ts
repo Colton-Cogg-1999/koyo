@@ -3,6 +3,8 @@ import type { BookDetail } from './types';
 
 export interface Location {
   block: number;
+  endBlock?: number;
+  visibleStart?: number;
   fraction: number;
   page: number;
   ratio: number;

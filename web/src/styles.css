@@ -674,3 +674,9 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 
 .library-location { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .library-location code { overflow-wrap: anywhere; }
+.question-scope { display: grid; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.question-scope label { display: flex; gap: 8px; align-items: center; }
+.question-scope select { max-width: 100%; min-width: 0; }
+.study { display: flex; flex-direction: column; height: 100%; gap: var(--gap); min-height: 0; }
+.study-title { display: flex; gap: 16px; align-items: center; }
+.study .agent { min-height: 0; }
