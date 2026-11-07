@@ -240,6 +240,7 @@ export interface BlockLocation {
 
 export interface Storage {
   data_dir: string;
+  books_dir: string;
   notes_dir: string;
   books_bytes: number;
   audio_bytes: number;

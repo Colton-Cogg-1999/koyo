@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
+import { api, urls } from '../api';
 import { navigate } from '../route';
 import type { Book, Collection } from '../types';
-import { bytes, Cover, Empty, failure, Gauge, Pane, toast, when } from '../ui';
+import { bytes, Cover, Empty, failure, Gauge, Pane, toast, useAsync, when } from '../ui';
 
 /** A file manager for books: a keyboard list on the left, a preview on the right. */
 export function Library({ books, collections, filter, onChange, onImport }: {
@@ -12,6 +12,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
   onChange: () => void;
   onImport: () => void;
 }) {
+  const [storage] = useAsync(() => api.storage(), []);
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const shown = useMemo(() => {
@@ -58,6 +59,10 @@ export function Library({ books, collections, filter, onChange, onImport }: {
   return (
     <div className="split">
       <Pane title={<>LIBRARY <i>// {shown.length} {shown.length === 1 ? 'book' : 'books'}</i></>} tools={tabs} className="shelf">
+        <div className="library-location">
+          <span>Books are copied to <code>{storage?.books_dir ?? 'your local library'}</code></span>
+          <button className="ghost" onClick={() => void api.openLibraryFolder().catch(failure)}>Open books folder</button>
+        </div>
         <div className="shelf-tools">
           <input type="search" aria-label="Filter" placeholder="filter" value={query} onChange={(event) => { setQuery(event.target.value); setCursor(0); }} />
           <button className="solid" onClick={onImport}>+ add [a]</button>
@@ -120,6 +125,7 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
         {book.description && <p className="preview-text">{book.description.slice(0, 280)}</p>}
         <div className="preview-actions">
           <button className="solid" disabled={book.status !== 'ready'} onClick={() => navigate(`read/${book.id}`)}>open</button>
+          <a className="ghost" href={urls.file(book.id)} download={book.file_name}>Export original</a>
           <button className="ghost" onClick={() => void update({ favorite: !book.favorite })}>{book.favorite ? 'unstar' : 'star'}</button>
           <button className="ghost danger" onClick={() => {
             if (!window.confirm(`Remove "${book.title}" with its notes and audio?`)) return;

@@ -49,6 +49,7 @@ export const api = {
   saveSettings: (values: Record<string, unknown>) => request('/api/settings', send('PUT', values)),
   storage: () => request<Storage>('/api/storage'),
   theme: () => request<{ name: string | null; colors: Record<string, string> }>('/api/theme'),
+  openLibraryFolder: () => request('/api/storage/open-folder', send('POST')),
   openNotesFolder: () => request('/api/notes/open-folder', send('POST')),
   openExternal: (url: string) => request('/api/open', send('POST', { url })),
 

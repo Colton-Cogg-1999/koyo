@@ -157,10 +157,11 @@ export function Settings() {
 
         <section>
           <h2>STORAGE</h2>
-          <p className="hint">books, notes, audio and search all live on this disk. the original file is copied in on import, so the source can be moved or deleted. back up or sync the data directory to keep everything.</p>
+          <p className="hint">books, notes, audio and search all live on this disk. the original file is copied in on import, so the source can be moved or deleted. close OmaReader before copying the data directory for a complete backup. Do not sync a running database.</p>
           {storage && (
             <>
               <dl className="paths">
+                <dt>books</dt><dd><code>{storage.books_dir}</code></dd>
                 <dt>data</dt><dd><code>{storage.data_dir}</code></dd>
                 <dt>notes</dt><dd><code>{storage.notes_dir}</code> <span className="hint">mirrored as markdown on every change</span></dd>
               </dl>
@@ -172,6 +173,7 @@ export function Settings() {
                   <tr><td>voices</td><td>{bytes(storage.models_bytes)}</td></tr>
                 </tbody>
               </table>
+              <button className="ghost" onClick={() => void api.openLibraryFolder().catch(failure)}>Open books folder</button>
               <button className="ghost" onClick={() => void api.openNotesFolder().catch(failure)}><FolderOpen size={13} /> open notes folder</button>
               <p className="hint">opens {storage.formats.map((f) => `.${f}`).join(' ')}. {storage.calibre_installed ? 'calibre adds' : 'installing calibre adds'} {storage.calibre_formats.slice(0, 6).map((f) => `.${f}`).join(' ')} and more.</p>
             </>

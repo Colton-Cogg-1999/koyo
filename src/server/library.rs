@@ -298,6 +298,7 @@ async fn storage(State(state): State<AppState>) -> ApiResult {
     let (native, calibre) = ingest::supported_formats();
     Ok(Json(json!({
         "data_dir": paths.data,
+        "books_dir": paths.books,
         "notes_dir": notes::notes_dir(&state.db, paths),
         "books_bytes": dir_size(&paths.books),
         "audio_bytes": dir_size(&paths.audio),
@@ -325,6 +326,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/collections/{id}", delete(delete_collection).patch(rename_collection))
         .route("/api/settings", get(get_settings).put(put_settings))
         .route("/api/storage", get(storage))
+        .route("/api/storage/open-folder", post(open_library_folder))
         .route("/api/theme", get(theme))
         .route("/api/notes/open-folder", post(open_notes_folder))
         .route("/api/open", post(open_external))
@@ -353,5 +355,10 @@ async fn open_notes_folder(State(state): State<AppState>) -> ApiResult {
     let dir = notes::notes_dir(&state.db, &state.paths);
     let _ = fs::create_dir_all(&dir);
     let _ = std::process::Command::new("xdg-open").arg(dir).spawn();
+    Ok(Json(json!({"ok": true})))
+}
+
+async fn open_library_folder(State(state): State<AppState>) -> ApiResult {
+    std::process::Command::new("xdg-open").arg(&state.paths.books).spawn()?;
     Ok(Json(json!({"ok": true})))
 }
