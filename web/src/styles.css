@@ -3,22 +3,33 @@
 
 :root {
   color-scheme: dark;
-  --bg: #08090c;
-  --pane: #0c0e12;
-  --pane-2: #13161c;
-  --fg: #cdd3d0;
-  --bright: #eef2ee;
-  --dim: #8b949c;
-  --faint: #5a636c;
-  --green: #9ece6a;
-  --cyan: #4fe3e3;
-  --magenta: #e44fd8;
-  --amber: #e0af68;
-  --red: #f7768e;
-  --line: color-mix(in srgb, var(--fg) 20%, var(--pane));
-  --line-soft: color-mix(in srgb, var(--fg) 11%, var(--pane));
-  --glow-cyan: color-mix(in srgb, var(--cyan) 22%, transparent);
-  --mono: 'JetBrains Mono Variable', 'JetBrainsMono Nerd Font', ui-monospace, monospace;
+  --surface-app: #111310;
+  --surface-reading: #151714;
+  --surface-sidebar: #181a17;
+  --surface-raised: #22251f;
+  --text-primary: #e7e3d8;
+  --text-secondary: #aaa99f;
+  --text-muted: #85887f;
+  --divider: #32362f;
+  --accent: #a0b88a;
+  --selection: #394734;
+  --surface-hover: #292e27;
+  --bg: var(--surface-app);
+  --pane: var(--surface-reading);
+  --pane-2: var(--surface-raised);
+  --fg: var(--text-primary);
+  --bright: var(--text-primary);
+  --dim: var(--text-secondary);
+  --faint: var(--text-muted);
+  --green: var(--accent);
+  --cyan: #a6b9ad;
+  --magenta: #b4a2af;
+  --amber: #c1b08d;
+  --red: #d59b91;
+  --line: var(--divider);
+  --line-soft: color-mix(in srgb, var(--divider) 65%, transparent);
+  --glow-cyan: var(--selection);
+  --mono: 'IBM Plex Mono', 'JetBrains Mono Variable', ui-monospace, monospace;
   --gap: 10px;
 }
 
@@ -102,7 +113,7 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
   font-weight: 500;
   letter-spacing: 0.06em;
   text-overflow: ellipsis;
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
   color: var(--bright);
 }
@@ -182,7 +193,7 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 
 .now-text { display: block; width: 100%; padding: 12px 14px 8px; }
 .now-text:disabled { opacity: 1; }
-.now-text span { display: block; overflow: hidden; color: var(--fg); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.now-text span { display: block; overflow: hidden; color: var(--fg); text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 .now-text em { color: var(--bright); font-style: normal; }
 
 .progress { padding: 0 14px; }
@@ -226,7 +237,7 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 .seek i { position: absolute; inset: 0 auto 0 0; background: var(--cyan); box-shadow: 0 0 6px var(--cyan); }
 .times { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .rate { padding: 0 2px; border: 0; background: none; color: var(--dim); font-size: 12.5px; }
-.audio-chapter { margin-block: 6px; overflow: hidden; color: var(--bright); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.audio-chapter { margin-block: 6px; overflow: hidden; color: var(--bright); text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
 
 .gen-status { display: flex; align-items: center; gap: 6px; margin-block: 6px 12px; }
 .meter { position: relative; flex: 1; height: 24px; overflow: hidden; border: 1px solid var(--line); margin: 0 12px 12px; }
@@ -353,10 +364,10 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
   font-weight: 600;
   letter-spacing: 0.05em;
   line-height: 1.3;
-  text-transform: uppercase;
+  text-transform: none;
 }
 .prose h1 { font-size: 1.3em; }
-.prose :is(h1, h2, h3)::before { content: '# '; color: var(--accent); }
+.prose :is(h1, h2, h3)::before { content: none; }
 .prose :is(h4, h5, h6) { margin: 1.4em 0 0.4em; color: var(--ink-strong); font-size: 1em; font-weight: 600; }
 .prose > :first-child { margin-top: 0; }
 .prose em { font-style: italic; }
@@ -382,7 +393,7 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 
 .next-chapter, .the-end { display: block; width: 100%; margin-top: 3em; padding: 1em 0; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 0.88em; }
 .next-chapter span { display: block; color: var(--accent); }
-.next-chapter strong { color: var(--ink-strong); font-weight: 500; text-transform: uppercase; }
+.next-chapter strong { color: var(--ink-strong); font-weight: 500; text-transform: none; }
 .next-chapter:hover strong { color: var(--accent); }
 .scanned-note { position: absolute; left: 12px; right: 12px; top: 10px; z-index: 3; padding: 4px 10px; border: 1px solid var(--amber); background: var(--pane); color: var(--amber); font-size: 12.5px; }
 
@@ -600,7 +611,7 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 .scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 14px; }
 .mark-group { margin-bottom: 24px; }
 .mark-group > header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
-.mark-group h2 { color: var(--green); font-size: 13.5px; font-weight: 500; text-transform: uppercase; }
+.mark-group h2 { color: var(--green); font-size: 13.5px; font-weight: 500; text-transform: none; }
 .mark-group header span { flex: 1; color: var(--dim); }
 .mark-group .passage { margin-bottom: 10px; }
 .audio-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
@@ -777,3 +788,19 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 }
 .agent .ask textarea:focus-visible { outline: none; }
 .agent .quoted span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+
+/* Literary defaults and a restrained, shared surface vocabulary. */
+.pane-title h2 { text-transform: none; letter-spacing: .01em; font-weight: 500; }
+.app-nav .workspaces button { font-size: 14px; }
+.app-brand { text-transform: none; letter-spacing: .02em; }
+.reader .volume { border: 0; }
+.reader .side { background: var(--surface-sidebar); }
+.reader .side > .pane { border: 0; background: transparent; }
+.prose :is(h1,h2,h3) { letter-spacing: 0; font-weight: 500; }
+.prose h1 { font-size: 1.7em; }
+.prose p { margin-bottom: 1em; text-align: start; }
+.paper { padding-inline: clamp(24px, 5vw, 80px); max-width: calc(var(--read-width) + 8em); }
+::selection { background: var(--selection); color: var(--bright); }
+::highlight(oma-green) { background: var(--selection); }
+@keyframes flash { 0%, 30% { background: var(--selection); } 100% { background: transparent; } }
+:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }

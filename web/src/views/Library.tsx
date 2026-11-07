@@ -48,8 +48,8 @@ export function Library({ books, collections, filter, onChange, onImport }: {
 
   const tabs = (
     <>
-      <button className={`tab ${!filter.collection && !filter.favorites ? 'on' : ''}`} onClick={() => navigate('library')}>all</button>
-      <button className={`tab ${filter.favorites ? 'on' : ''}`} onClick={() => navigate('library?fav')}>starred</button>
+      <button className={`tab ${!filter.collection && !filter.favorites ? 'on' : ''}`} onClick={() => navigate('library')}>All</button>
+      <button className={`tab ${filter.favorites ? 'on' : ''}`} onClick={() => navigate('library?fav')}>Starred</button>
       {collections.map((collection) => (
         <button key={collection.id} className={`tab ${filter.collection === String(collection.id) ? 'on' : ''}`} onClick={() => navigate(`library?c=${collection.id}`)}>{collection.name}</button>
       ))}
@@ -58,14 +58,14 @@ export function Library({ books, collections, filter, onChange, onImport }: {
 
   return (
     <div className="split">
-      <Pane title={<>LIBRARY <i>// {shown.length} {shown.length === 1 ? 'book' : 'books'}</i></>} tools={tabs} className="shelf">
+      <Pane title={<>Library <i>· {shown.length} {shown.length === 1 ? 'book' : 'books'}</i></>} tools={tabs} className="shelf">
         <div className="library-location">
           <span title="Importing saves a copy in OmaReader. Moving or deleting the original does not remove it from your library.">Your books · saved on this device</span>
           <button className="ghost" onClick={() => navigate('settings')}>Manage storage</button>
         </div>
         <div className="shelf-tools">
           <input type="search" aria-label="Filter" placeholder="filter" value={query} onChange={(event) => { setQuery(event.target.value); setCursor(0); }} />
-          <button className="solid" onClick={onImport}>+ add [a]</button>
+          <button className="solid" onClick={onImport}>Import books</button>
         </div>
         {shown.length === 0 ? (
           <Empty title={books.length ? 'no matches' : 'library empty'}>
@@ -95,7 +95,7 @@ export function Library({ books, collections, filter, onChange, onImport }: {
         )}
         <footer className="keys"><kbd>j</kbd><kbd>k</kbd> move <kbd>enter</kbd> open <kbd>s</kbd> star <kbd>a</kbd> add <kbd>/</kbd> search text</footer>
       </Pane>
-      {selected ? <Preview key={selected.id} book={selected} collections={collections} onChange={onChange} /> : <Pane title="PREVIEW" className="preview"><p className="hint">no selection.</p></Pane>}
+      {selected ? <Preview key={selected.id} book={selected} collections={collections} onChange={onChange} /> : <Pane title="Book details" className="preview"><p className="hint">no selection.</p></Pane>}
     </div>
   );
 }
@@ -106,7 +106,7 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
   const update = (patch: Parameters<typeof api.updateBook>[1]) => api.updateBook(book.id, patch).then(onChange).catch(failure);
   const toggle = (id: number) => update({ collections: memberOf.includes(id) ? memberOf.filter((c) => c !== id) : [...memberOf, id] });
   return (
-    <Pane title="PREVIEW" className="preview">
+    <Pane title="Book details" className="preview">
       <div className="preview-body">
         <Cover book={book} />
         <h3>{book.title}</h3>
@@ -124,7 +124,7 @@ function Preview({ book, collections, onChange }: { book: Book; collections: Col
         </dl>
         {book.description && <p className="preview-text">{book.description.slice(0, 280)}</p>}
         <div className="preview-actions">
-          <button className="solid" disabled={book.status !== 'ready'} onClick={() => navigate(`read/${book.id}`)}>open</button>
+          <button className="solid" disabled={book.status !== 'ready'} onClick={() => navigate(`read/${book.id}`)}>Read</button>
           <button className="ghost" disabled={book.status !== 'ready'} onClick={() => navigate(`ask/${book.id}`)}>Ask this book</button>
           <a className="ghost" href={urls.file(book.id)} download={book.file_name}>Export original</a>
           <button className="ghost" onClick={() => void update({ favorite: !book.favorite })}>{book.favorite ? 'unstar' : 'star'}</button>

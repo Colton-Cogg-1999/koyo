@@ -264,4 +264,4 @@ export interface ReaderPrefs {
   zoom: number;
 }
 
-export const defaultPrefs: ReaderPrefs = { font: 'mono', size: 16, leading: 1.65, width: 46, paper: 'term', zoom: 1 };
+export const defaultPrefs: ReaderPrefs = { font: 'literata', size: 20, leading: 1.65, width: 36, paper: 'term', zoom: 1 };

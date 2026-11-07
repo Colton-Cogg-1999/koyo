@@ -8,12 +8,11 @@ import type { Book, Voice } from './types';
 import { bytes, clock, failure, Logo, Pane, toast, useAsync } from './ui';
 
 export const WORKSPACES: { key: string; label: string; path: string; match: Route['view'] }[] = [
-  { key: '1', label: 'LIB', path: 'library', match: 'library' },
-  { key: '2', label: 'READ', path: '', match: 'read' },
-  { key: '3', label: 'MARKS', path: 'annotations', match: 'annotations' },
-  { key: '4', label: 'AUDIO', path: 'audiobooks', match: 'audiobooks' },
-  { key: '5', label: 'NOTES', path: 'notebook', match: 'notebook' },
-  { key: '6', label: 'SYS', path: 'settings', match: 'settings' },
+  { key: '1', label: 'Library', path: 'library', match: 'library' },
+  { key: '2', label: 'Read', path: '', match: 'read' },
+  { key: '3', label: 'Marks', path: 'annotations', match: 'annotations' },
+  { key: '4', label: 'Audio', path: 'audiobooks', match: 'audiobooks' },
+  { key: '5', label: 'Settings', path: 'settings', match: 'settings' },
 ];
 
 export function NowPane({ route, latest, onWorkspace }: { route: Route; latest?: Book; onWorkspace: (path: string) => void }) {
@@ -189,7 +188,7 @@ export function AudioPane({ fallbackBookId }: { fallbackBookId?: string }) {
     setChanging(false);
   };
 
-  const title = `KOKORO AUDIOBOOK${book ? ` // ${book.title}` : ''}`;
+  const title = `Narration${book ? ` // ${book.title}` : ''}`;
   if (!status) return <Pane title={title} className="audio"><p className="hint">loading…</p></Pane>;
   if (!status.ffmpeg) return <Pane title={title} className="audio"><p className="hint">requires ffmpeg: <code>sudo pacman -S ffmpeg</code></p></Pane>;
 

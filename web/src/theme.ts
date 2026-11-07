@@ -29,9 +29,9 @@ async function applySystem() {
   }
 }
 
-let mode: 'neon' | 'system' = 'neon';
+let mode: 'olive' | 'system' = 'olive';
 
-export function setThemeMode(next: 'neon' | 'system') {
+export function setThemeMode(next: 'olive' | 'system') {
   mode = next;
   if (next === 'system') void applySystem().catch(() => {});
   else clearTheme();
@@ -42,7 +42,7 @@ export function themeMode() {
 }
 
 export function startTheme() {
-  api.settings().then((s) => setThemeMode(s.theme === 'system' ? 'system' : 'neon')).catch(() => {});
+  api.settings().then((s) => setThemeMode(s.theme === 'system' ? 'system' : 'olive')).catch(() => {});
   onServerEvent((event) => {
     if (event.type === 'theme' && mode === 'system') void applySystem().catch(() => {});
   });

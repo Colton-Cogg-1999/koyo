@@ -66,7 +66,7 @@ export function Audiobooks() {
     if (event.type === 'audio') reload();
   }), []);
   return (
-    <Pane className="full" title="AUDIOBOOKS">
+    <Pane className="full" title="Audio">
       <div className="scroll">
         {rows?.map((row) => {
           const active = audio.book === row.book_id;
@@ -137,26 +137,26 @@ export function Settings() {
     setChecking(false);
   };
 
-  const chooseTheme = (next: 'neon' | 'system') => {
+  const chooseTheme = (next: 'olive' | 'system') => {
     setMode(next);
     setThemeMode(next);
     void api.saveSettings({ theme: next }).catch(failure);
   };
 
   return (
-    <Pane className="full" title="SYS">
+    <Pane className="full" title="Settings">
       <div className="scroll settings">
         <section>
-          <h2>THEME</h2>
+          <h2>Appearance</h2>
           <div className="choices">
-            <button className={mode === 'neon' ? 'on' : ''} onClick={() => chooseTheme('neon')}>omarchy neon</button>
+            <button className={mode === 'olive' ? 'on' : ''} onClick={() => chooseTheme('olive')}>OmaReader dark</button>
             <button className={mode === 'system' ? 'on' : ''} onClick={() => chooseTheme('system')}>follow system{theme?.name ? ` (${theme.name})` : ''}</button>
           </div>
           <p className="hint">follow system tracks <code>omarchy theme set</code> live.</p>
         </section>
 
         <section>
-          <h2>LIBRARY STORAGE</h2>
+          <h2>Library storage</h2>
           <p className="hint">OmaReader keeps its own persistent library on this device. Imported books, notes, highlights, and reading positions remain when you close the app. You can move or delete the original files after importing. Use Export original to take a book back out.</p>
           {storage && (
             <>
@@ -182,7 +182,7 @@ export function Settings() {
         </section>
 
         <section>
-          <h2>AGENT</h2>
+          <h2 id="ai-settings">AI</h2>
           <p className="hint">optional: ask questions through your installed Claude Code or Codex CLI. questions, retrieved book passages, and recent chat history go to that provider. requests run with tools disabled; provider credentials are managed by the CLI.</p>
           <div className="provider-cards">
             {providers?.providers.map((p) => (
@@ -209,7 +209,7 @@ export function Settings() {
         </section>
 
         <section>
-          <h2>NARRATION</h2>
+          <h2>Audio</h2>
           <p className="hint">{tts?.installed ? 'voice engine installed. audio is generated locally at low priority.' : 'voices download from the audiobook pane on first use.'}</p>
           {tts && (
             <label className="row-field">threads
