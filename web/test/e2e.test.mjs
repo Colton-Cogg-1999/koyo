@@ -290,3 +290,104 @@ test('live AI answers use the selected provider and persist citations', { skip: 
     t.diagnostic(`${provider.id}: live response and citation persistence passed`);
   }
 });
+
+test('library exposes originals and asks about a chapter without opening the reader', async () => {
+  const before = (await api(`/api/books/${epub}`)).position;
+  const storage = await api('/api/storage');
+  assert.equal(storage.books_dir, join(data, 'lib', 'books'));
+  await page.goto(`${ORIGIN}/#/library`);
+  await page.click('.row[title="Open Shelves"]');
+  assert.match(await page.textContent('.library-location'), /books/);
+  const download = page.waitForEvent('download');
+  await page.click('a:has-text("Export original")');
+  const original = await download;
+  assert.deepEqual(readFileSync(await original.path()), readFileSync(join(data, 'fixture.epub')));
+  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [] }], selected: 'codex' } }));
+  let sent;
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent = route.request().postDataJSON();
+    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","text":"Test transport only."}\n\ndata: {"type":"done","id":1}\n\n' });
+  });
+  await page.click('button:has-text("Ask this book")');
+  await page.waitForSelector('.study .agent');
+  assert.equal(await page.locator('.prose,.pdf-page').count(), 0);
+  await page.selectOption('[aria-label="Question scope"]', 'chapter');
+  const book = await api(`/api/books/${epub}`);
+  const chapter = book.chapters.find((c) => c.title === 'Room for Everyone');
+  await page.selectOption('[aria-label="Question chapter"]', String(chapter.idx));
+  await page.fill('.ask textarea', 'What stands between a person and a book?');
+  await page.click('.ask button[type="submit"]');
+  await eventually(() => sent);
+  assert.equal(sent.scope, 'chapter');
+  assert.equal(sent.chapter, chapter.idx);
+  assert.equal(sent.block, undefined);
+  assert.deepEqual((await api(`/api/books/${epub}`)).position, before);
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers');
+});
+
+test('reader sends visible bounds and exact highlighted context', async () => {
+  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [] }], selected: 'codex' } }));
+  const sent = [];
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","text":"Test transport only."}\n\ndata: {"type":"done","id":1}\n\n' });
+  });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await page.fill('.ask textarea', 'Explain the visible page');
+  await page.click('.ask button[type="submit"]');
+  await eventually(() => sent.length === 1);
+  assert.equal(sent[0].scope, 'page');
+  assert.ok(Number.isInteger(sent[0].block) && sent[0].end_block >= sent[0].block);
+  await select(1);
+  const quote = await page.locator('[data-b="1"]').textContent();
+  await page.click('.pick-menu button[title="Ask Oma"]');
+  await page.fill('.ask textarea', 'What does this selected passage mean?');
+  await page.click('.ask button[type="submit"]');
+  await eventually(() => sent.length === 2);
+  assert.equal(sent[1].scope, 'selection');
+  assert.equal(sent[1].block, 1);
+  assert.equal(sent[1].end_block, 1);
+  assert.equal(sent[1].selection, quote.trim().replace(/\s+/g, ' '));
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers');
+});
+
+test('live AI answers page, selection, and chosen chapter questions from the correct evidence', { skip: !process.env.OMAREADER_TEST_AI, timeout: 900000 }, async (t) => {
+  writeFileSync(join(data, 'signals.md'), '# Harbor\n\nThe harbor signal is amber. Its keeper is Mara. The access phrase is copper otter.\n\n# Observatory\n\nThe observatory signal is violet. Its keeper is Ivo. The access phrase is silver badger.\n');
+  const id = await upload('signals.md');
+  const providers = (await api('/api/ai/providers')).providers.filter((p) => p.signed_in);
+  assert.ok(providers.length, 'Live AI verification requires an authenticated provider');
+  const cases = [
+    { name: 'page', body: { scope: 'page', block: 1, end_block: 1, question: 'What is the access phrase on this page? Give only the phrase and a citation.' }, expected: /copper otter/i, forbidden: /silver badger/i, block: 1 },
+    { name: 'selection', body: { scope: 'selection', block: 1, end_block: 1, selection: 'Its keeper is Mara.', question: 'Who is the keeper named in the selected text? Give only the name and a citation.' }, expected: /Mara/, forbidden: /Ivo/, block: 1 },
+    { name: 'chosen chapter', body: { scope: 'chapter', chapter: 1, block: 0, question: 'What is the access phrase in this chapter? Give only the phrase and a citation.' }, expected: /silver badger/i, forbidden: /copper otter/i, block: 2 },
+    { name: 'unanswerable', body: { scope: 'selection', block: 1, selection: 'Its keeper is Mara.', question: 'What year was Mara born? If the provided text does not say, answer: Not stated in the selected text.' }, expected: /not stated/i, forbidden: /\b(?:19|20)\d\d\b/, block: 1 },
+  ];
+  for (const provider of providers) {
+    await api('/api/settings', 'PUT', { ai_provider: provider.id, ai_model: '' });
+    for (const item of cases) await t.test(`${provider.id}: ${item.name}`, async () => {
+      const chat = await api(`/api/books/${id}/chats`, 'POST');
+      const response = await fetch(`${ORIGIN}/api/chats/${chat.id}/messages`, { method: 'POST', signal: AbortSignal.timeout(120000),
+        headers: { Cookie: `oma_session=${token}`, Origin: ORIGIN, 'Content-Type': 'application/json' }, body: JSON.stringify(item.body) });
+      assert.ok(response.ok, await (!response.ok ? response.text() : Promise.resolve('')));
+      const events = (await response.text()).split('\n').filter((l) => l.startsWith('data: ')).map((l) => JSON.parse(l.slice(6)));
+      assert.ok(!events.some((e) => e.type === 'error'), JSON.stringify(events));
+      assert.ok(events.some((e) => e.type === 'done'));
+      const answer = (await api(`/api/chats/${chat.id}/messages`)).at(-1);
+      assert.match(answer.content, item.expected);
+      assert.doesNotMatch(answer.content, item.forbidden);
+      assert.ok(answer.citations.length > 0);
+      assert.ok(answer.citations.every((c) => c.block >= item.block));
+      if (item.name !== 'unanswerable') {
+        const used = [...answer.content.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
+        assert.ok(used.length > 0, answer.content);
+        for (const n of used) assert.match(answer.citations.find((c) => c.n === n)?.quote ?? '', item.expected);
+      }
+      t.diagnostic(`${provider.id}, ${item.name}: ${answer.content}`);
+    });
+  }
+});
