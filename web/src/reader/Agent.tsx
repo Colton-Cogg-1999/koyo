@@ -8,7 +8,7 @@ import { failure, Pane, toast, useAsync } from '../ui';
 
 const COMMANDS: Record<string, { question: string; label: string; scope?: 'chapter' | 'book'; hint: string }> = {
   '/summarize': { question: 'Summarize this chapter: its argument or events, and what matters most.', label: '/summarize', scope: 'chapter', hint: 'this chapter' },
-  '/ideas': { question: 'What are the central ideas of this book, and how do they build on each other?', label: '/ideas', scope: 'book', hint: 'the whole book' },
+  '/ideas': { question: 'What are the central ideas of this book, and how do they build on each other?', label: '/ideas', scope: 'book', hint: 'sampled book overview' },
   '/quiz': { question: 'Write five thought-provoking questions on this chapter to test my understanding. Do not give the answers yet.', label: '/quiz', scope: 'chapter', hint: 'test yourself' },
 };
 const LOCAL = ['/new', '/clear', '/model'];
@@ -140,7 +140,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
       return;
     }
     const command = COMMANDS[text];
-    if (command) void send(command.question, command);
+    if (command) { setScope(command.scope); void send(command.question, command); }
     else void send(input);
   };
 
@@ -172,7 +172,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
       const citation = message.citations.find((c) => String(c.n) === n);
       return citation ? ` (${citation.chapter}${citation.page ? `, p. ${citation.page}` : ''})` : whole;
     });
-    await api.createNote({ book_id: book.id, title: question.split('\n')[0].slice(0, 90), body: cited });
+    await api.createNote({ book_id: book.id, title: question.split('\n')[0].slice(0, 90), body: cited + (message.citations.length ? '\n\nSources:\n' + message.citations.map((c) => `- [${c.chapter}${c.page ? `, p. ${c.page}` : ''}, passage ${c.block}](#/read/${book.id}?b=${c.block}): ${c.quote}`).join('\n') : '') });
     toast('saved to notebook');
   };
 
@@ -253,7 +253,7 @@ export function Agent({ book, location, seed, go }: { book: BookDetail; location
           ))}
         </div>
       )}
-      {selection && (
+      {selection && scope === 'selection' && (
         <div className="quoted"><span>"{selection.selection.slice(0, 130)}{selection.selection.length > 130 ? '…' : ''}"</span><button className="icon" title="Remove" onClick={() => { setSelection(null); if (scope === 'selection') setScope(location ? 'page' : 'search'); }}>×</button></div>
       )}
       <form className="ask" onSubmit={(event) => { event.preventDefault(); submit(); }}>

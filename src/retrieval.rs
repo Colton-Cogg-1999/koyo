@@ -164,6 +164,12 @@ struct Builder {
 
 impl Builder {
     fn add(&mut self, block: u32, page: u32, text: &str) {
+        let remaining = CHAPTER_BUDGET.saturating_sub(self.sources.len());
+        if remaining < 256 { return; }
+        let mut end = text.len().min(remaining - 256);
+        while !text.is_char_boundary(end) { end -= 1; }
+        let text = &text[..end];
+        if text.trim().is_empty() { return; }
         let n = self.citations.len() + 1;
         let chapter = chapter_of(&self.chapters, block).map(|c| c.title.clone()).unwrap_or_default();
         let location = if page > 0 { format!("{chapter}, p. {page}") } else { chapter.clone() };
@@ -215,14 +221,14 @@ fn sampled(rows: Vec<Row>, budget: usize) -> Vec<Row> {
     }).collect()
 }
 
-fn add_search_hits(b: &mut Builder, conn: &Connection, book: &str, query: &str) -> Result<()> {
+fn add_search_hits(b: &mut Builder, conn: &Connection, book: &str, query: &str, bounds: Option<(u32, u32)>) -> Result<()> {
     let Some(fts) = fts_query(query) else { return Ok(()) };
     let mut stmt = conn.prepare(
         "SELECT b.seq FROM blocks_fts JOIN blocks b ON b.id=blocks_fts.rowid
-         WHERE blocks_fts MATCH ?1 AND b.book_id=?2 AND length(b.text) > 24
+         WHERE blocks_fts MATCH ?1 AND b.book_id=?2 AND length(b.text) > 24 AND b.seq>=?3 AND b.seq<?4
          ORDER BY bm25(blocks_fts) LIMIT 80",
     )?;
-    let hits: Vec<u32> = stmt.query_map(params![fts, book], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    let hits: Vec<u32> = stmt.query_map(params![fts, book, bounds.map(|b| b.0).unwrap_or(0), bounds.map(|b| b.1).unwrap_or(u32::MAX)], |r| r.get(0))?.collect::<Result<_, _>>()?;
     let mut taken: Vec<(u32, u32)> = Vec::new();
     let already: Vec<u32> = b.citations.iter().map(|c| c.block).collect();
     for seq in hits {
@@ -232,7 +238,7 @@ fn add_search_hits(b: &mut Builder, conn: &Connection, book: &str, query: &str) 
         if taken.iter().any(|(s, e)| seq + 1 >= *s && seq <= *e) || already.contains(&seq) {
             continue;
         }
-        let window = range(conn, book, seq.saturating_sub(1), seq + 3)?;
+        let window = range(conn, book, seq.saturating_sub(1).max(bounds.map(|b| b.0).unwrap_or(0)), seq.saturating_add(3).min(bounds.map(|b| b.1).unwrap_or(u32::MAX)))?;
         let Some(first) = window.first() else { continue };
         let last = window.last().map(|r| r.seq).unwrap_or(seq);
         let text: Vec<&str> = window.iter().map(|r| r.text.as_str()).collect();
@@ -303,6 +309,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
         "chapter" => {
             let chapter = current.as_ref().context("Choose a chapter first.")?;
             {
+                add_search_hits(&mut b, &conn, book, &request.question, Some((chapter.start, chapter.end)))?;
                 let rows = sampled(range(&conn, book, chapter.start, chapter.end)?, CHAPTER_BUDGET);
                 b.add_rows(&rows, 1400);
             }
@@ -329,7 +336,7 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
                 query.push(' ');
                 query.push_str(previous);
             }
-            add_search_hits(&mut b, &conn, book, &query)?;
+            add_search_hits(&mut b, &conn, book, &query, None)?;
         }
     }
 
@@ -343,9 +350,6 @@ pub fn build(db: &Db, book: &str, request: &AskRequest, history: &[(String, Stri
     }
     if let Some(chapter) = &current {
         prompt.push_str(&format!("Chapter in context: {}\n", chapter.title));
-    }
-    if let Some(selection) = request.selection.as_deref().filter(|s| !s.trim().is_empty()) {
-        prompt.push_str(&format!("\nThe reader selected this text:\n{selection}\n"));
     }
     prompt.push_str("\n<sources>\n");
     prompt.push_str(&b.sources);

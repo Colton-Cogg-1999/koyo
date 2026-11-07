@@ -176,3 +176,21 @@ fn question_scopes_exclude_other_chapters_and_validate_selections() {
     request.chapter = Some(99);
     assert!(retrieval::build(&db, &id, &request, &[]).is_err());
 }
+
+#[test]
+fn long_chapter_questions_retrieve_relevant_passages_before_sampling() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("long.md");
+    let mut text = "# Long chapter\n\n".to_string();
+    for i in 0..300 {
+        if i == 173 { text.push_str("The secret password at the observatory is turquoise walrus.\n\n"); }
+        else { text.push_str(&format!("Paragraph {i}: {}\n\n", "Ordinary background material without a special answer. ".repeat(25))); }
+    }
+    text.push_str("# Another chapter\n\nThe secret password here is crimson sparrow.\n");
+    std::fs::write(&file, text).unwrap();
+    let id = ingest::import_path(&db, &paths, &file).unwrap();
+    let prompt = retrieval::build(&db, &id, &retrieval::AskRequest { question: "What is the secret password at the observatory?".into(), scope: Some("chapter".into()), chapter: Some(0), ..Default::default() }, &[]).unwrap();
+    assert!(prompt.prompt.contains("turquoise walrus"));
+    assert!(!prompt.prompt.contains("crimson sparrow"));
+    assert!(prompt.prompt.len() < 62_000);
+}

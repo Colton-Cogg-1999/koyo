@@ -263,7 +263,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
         frame.current ||= requestAnimationFrame(report);
       }}
     >
-      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in the margin; reselect the passage to attach a new highlight.</p>}
+      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in the book notebook; reselect the passage to attach a new highlight.</p>}
       <article className={`paper font-${prefs.font}`} style={style}>
         <div className="paper-body" ref={paper} onMouseUp={onMouseUp} onClick={onClick}>
           {section && <Prose html={section.html} />}
