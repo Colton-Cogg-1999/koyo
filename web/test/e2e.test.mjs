@@ -593,3 +593,92 @@ test('minimal reader has persistent zoom and moves narration into the Audio tab'
   await eventually(async () => Math.abs((await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width)) - before) < 2);
   assert.deepEqual(errors, []);
 });
+
+test('the quiet chat keeps citations, notebook saves, and model controls usable', async () => {
+  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [{ id: 'test', label: 'Test model' }] }], selected: 'codex' } }));
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await page.click('[aria-label="New conversation"]');
+  assert.equal(await page.locator('.agent .pane-title h2').textContent(), 'Ask this book');
+  assert.doesNotMatch(await page.textContent('.agent'), /USER_>|OMA:|AI AGENT|SYS:/);
+  assert.equal(await page.locator('.provider-menu').count(), 0);
+  await page.click('[aria-label="Chat options"]');
+  await page.waitForSelector('.provider-menu');
+  assert.ok(await page.locator('button:has-text("Test model")').isVisible());
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.provider-menu').count(), 0);
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    const events = [
+      { type: 'citations', citations: [{ n: 1, block: 1, page: 0, chapter: 'Open Shelves', quote: 'Reading should belong to everyone.' }] },
+      { type: 'delta', text: 'The passage treats reading as something everyone should have access to. It gives the reader room to pause, disagree, and ask a question of their own. [1]' },
+      { type: 'done', id: 1 },
+    ];
+    return route.fulfill({ contentType: 'text/event-stream', body: events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') });
+  });
+  await page.fill('.ask textarea', 'What does the passage say about the reader?');
+  await page.click('[aria-label="Send question"]');
+  await page.waitForSelector('.answer .cite');
+  assert.ok((await page.locator('.answer').evaluate((e) => getComputedStyle(e).fontFamily)).includes('Newsreader'));
+  await page.click('[title="Save answer to notebook"]');
+  await eventually(async () => (await api(`/api/notes?book=${epub}`)).some((n) => n.body.includes('Reading should belong to everyone.') && n.body.includes(`#/read/${epub}?b=1`)));
+  await page.click('.answer .cite');
+  await page.waitForSelector('[data-b="1"].flash');
+  await select(2);
+  await page.click('.pick-menu button[title="Ask Oma"]');
+  await page.waitForSelector('.quoted');
+  if (process.env.OMAREADER_CHAT_SCREENSHOT) await page.screenshot({ path: process.env.OMAREADER_CHAT_SCREENSHOT });
+  await page.click('[aria-label="Remove selected text"]');
+  assert.equal(await page.locator('.quoted').count(), 0);
+  assert.equal(await page.inputValue('[aria-label="Question scope"]'), 'page');
+  await page.click('[aria-label="New conversation"]');
+  assert.equal(await page.locator('.answer').count(), 0);
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers');
+  assert.deepEqual(errors, []);
+});
+
+test('managed books and notes survive server restart after deleting the imported source', async () => {
+  const library = join(data, 'persistent-library');
+  let child;
+  const launch = async () => {
+    child = spawn(binary, ['serve', '0'], { env: { ...process.env, OMAREADER_DATA_DIR: library }, stdio: 'pipe' });
+    return new Promise((resolve, reject) => {
+      let stdout = '', stderr = '';
+      const timer = setTimeout(() => reject(new Error(`restart timed out: ${stderr}`)), 15000);
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.stdout.on('data', (d) => { stdout += d; if (stdout.includes('\n')) { clearTimeout(timer); resolve(new URL(stdout.split('\n')[0].trim())); } });
+      child.once('error', (e) => { clearTimeout(timer); reject(e); });
+      child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`server exited: ${code} ${stderr}`)); });
+    });
+  };
+  const stop = async () => {
+    if (child && child.exitCode === null) { const ended = new Promise((r) => child.once('exit', r)); child.kill(); await ended; }
+  };
+  try {
+    let url = await launch();
+    const call = async (path, method = 'GET', body, extra = {}) => {
+      const response = await fetch(`${url.origin}${path}`, { method, headers: { Cookie: `oma_session=${url.searchParams.get('t')}`, Origin: url.origin, 'Content-Type': 'application/json', ...extra }, body });
+      assert.ok(response.ok, `${path}: ${response.status}`);
+      return response;
+    };
+    const original = join(data, 'persistent-source.md');
+    const text = '# A book to keep\n\nThis original file can go away. The imported book stays in OmaReader.\n';
+    writeFileSync(original, text);
+    const imported = await (await call('/api/books', 'POST', readFileSync(original), { 'x-file-name': 'persistent-source.md', 'Content-Type': 'application/octet-stream' })).json();
+    const id = imported.id;
+    await eventually(async () => (await (await call(`/api/books/${id}`)).json()).status === 'ready');
+    await call('/api/notes', 'POST', JSON.stringify({ book_id: id, title: 'Keep this thought', body: 'My notes survive too.' }));
+    await call(`/api/books/${id}/position`, 'PUT', JSON.stringify({ block: 1, fraction: 0.3, page: 0 }));
+    rmSync(original);
+    await stop();
+    url = await launch();
+    const book = await (await call(`/api/books/${id}`)).json();
+    assert.equal(book.status, 'ready');
+    assert.equal(book.position.block, 1);
+    assert.equal(book.position.fraction, 0.3);
+    assert.equal(await (await call(`/api/books/${id}/file`)).text(), text);
+    const notes = await (await call(`/api/notes?book=${id}`)).json();
+    assert.ok(notes.some((n) => n.body === 'My notes survive too.'));
+  } finally { await stop(); }
+});
