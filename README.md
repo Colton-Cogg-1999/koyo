@@ -1,12 +1,14 @@
 # OmaReader
 
-**Your books. Your notes. No gatekeeper.**
+**I'm not going to tell you where to get your books. When you find some, read them here.**
 
-Knowledge should not be a luxury product. You should not need a university login, a monthly subscription, or a company's permission to read a book you already have. You should not lose your notes because a service shuts down or decides you are no longer a customer.
+That's the idea. Put your EPUBs and PDFs in a library, read them, scribble in the margins, and pick up where you left off. If you'd rather listen, let your computer read them to you. If a paragraph makes no sense, ask about it—and check the answer against the actual page.
 
-OmaReader is built around a straightforward position: **the reader should be in control.** Open local files. Read offline. Keep notes in a format other tools can understand. Listen without paying a cloud service for every paragraph. Inspect the code, change it, and share what you improve.
+I don't think access to information should depend on whether you have the right university email or another twenty dollars a month. A reader shouldn't become another toll booth. There is no OmaReader account, subscription, or premium tier. Your books stay on your machine. Your notes can leave with you.
 
-This reader cannot fix the economics of publishing by itself. It can refuse to add another locked door. Reading, search, highlighting, notes, and local narration have no OmaReader account, subscription, or paid tier. AI is optional; a book does not need a chatbot to be worth reading.
+This is an open-source project because I want something I can use, fix, and keep using. You should be able to do the same. It isn't finished, and I'm not going to pretend a chatbot with a citation button is automatically a research tool. The work is making reading, notes, listening, and answers trustworthy enough to use every day.
+
+AI is optional. Sometimes you just want to read a damn book.
 
 ## What it does
 
