@@ -89,10 +89,10 @@ test('a dropped file is imported, read, marked and survives a reload', async () 
 });
 
 test('the notes pane switches tabs and notes become Markdown files', async () => {
-  await page.click('.tab:has-text("index")');
+  await page.click('.margin-pane .tab:has-text("Chapters")');
   await page.click('.index button:has-text("Bells")');
-  await page.click('.tab:has-text("notebook")');
-  await page.click('.tab:has-text("margin")');
+  await page.click('.margin-pane .tab:has-text("Saved")');
+  await page.click('.margin-pane .tab:has-text("Notes")');
   assert.equal(await page.locator('.crash').count(), 0);
   const notes = await page.evaluate(() => fetch('/api/storage').then((r) => r.json()));
   const { readdirSync } = await import('node:fs');
@@ -341,7 +341,7 @@ test('library exposes originals and asks about a chapter without opening the rea
   await page.selectOption('[aria-label="Question scope"]', 'chapter');
   const book = await api(`/api/books/${epub}`);
   const chapter = book.chapters.find((c) => c.title === 'Room for Everyone');
-  await page.selectOption('[aria-label="Question chapter"]', String(chapter.idx));
+  await page.selectOption('[aria-label="Question scope"]', `chapter:${chapter.idx}`);
   await page.fill('.ask textarea', 'What stands between a person and a book?');
   await page.click('.ask button[type="submit"]');
   await eventually(() => sent);
@@ -438,7 +438,7 @@ test('EPUB passage notes survive reflow and failed saves retain a recoverable dr
   await page.reload();
   await page.waitForSelector('.prose p');
   // Open the saved highlight through the margin, including its unsaved local draft.
-  await page.click('.tab:has-text("margin")');
+  await page.click('.margin-pane .tab:has-text("Notes")');
   const annotations = await api(`/api/annotations?book=${epub}`);
   const annotation = annotations.find((a) => a.quote === quote);
   assert.ok(annotation);
@@ -523,7 +523,7 @@ test('portrait layout keeps book actions, reading, and question controls accessi
   await page.click('button:has-text("Ask this book")');
   await page.waitForSelector('.study .agent');
   await page.selectOption('[aria-label="Question scope"]', 'chapter');
-  assert.ok(await page.locator('[aria-label="Question chapter"]').isVisible());
+  assert.ok(await page.locator('[aria-label="Question scope"] optgroup option').count() > 0);
   await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
   await page.waitForSelector('.prose p');
   assert.equal(await page.locator('.side').isVisible(), false);
@@ -630,7 +630,7 @@ test('the quiet chat keeps citations, shared marks, and settings shortcuts usabl
   await page.click('[aria-label="Send question"]');
   await page.waitForSelector('.answer .cite');
   assert.ok((await page.locator('.answer').evaluate((e) => getComputedStyle(e).fontFamily)).includes('Newsreader'));
-  await page.click('[title="Save answer to notebook"]');
+  await page.click('[title="Save answer to Marks"]');
   await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((n) => n.note.includes('Reading should belong to everyone.') && n.block === 1));
   await page.click('.answer .cite');
   await page.waitForSelector('[data-b="1"].flash');
@@ -691,4 +691,143 @@ test('managed books and notes survive server restart after deleting the imported
     const notes = await (await call(`/api/notes?book=${id}`)).json();
     assert.ok(notes.some((n) => n.body === 'My notes survive too.'));
   } finally { await stop(); }
+});
+
+test('reading panels, palette, shared marks and drafts stay coherent across navigation', async () => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.evaluate(() => { localStorage.setItem('omareader:sidebar-open','true'); localStorage.removeItem('omareader:sidebar-width'); });
+  await api('/api/settings', 'PUT', { reader: { font:'literata',size:20,leading:1.65,width:36,paper:'term',zoom:1 } });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await page.locator('[aria-label="Sidebar width"]').focus();
+  await page.keyboard.press('ArrowLeft');
+  assert.equal(await page.locator('[aria-label="Sidebar width"]').getAttribute('aria-valuenow'), '29');
+  await page.fill('.ask textarea', 'A question I am still writing');
+  await page.click('[aria-label="Collapse chat"]');
+  assert.equal(await page.locator('.ask textarea').isVisible(), false);
+  await page.click('[aria-label="Expand chat"]');
+  assert.equal(await page.inputValue('.ask textarea'), 'A question I am still writing');
+  await page.keyboard.press('Control+Shift+P');
+  await page.fill('[aria-label="Find a command"]', 'Open Marks');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.marks-view');
+  await page.fill('[aria-label="Filter marks"]', 'Reflow must keep');
+  assert.equal(await page.locator('.mark-entry').count(), 1);
+  await page.click('.mark-entry button:has-text("Edit note")');
+  await page.fill('[aria-label="Edit mark note"]','Shared between Notes and Marks.');
+  await page.click('.mark-editor button:has-text("Save")');
+  await page.fill('[aria-label="Filter marks"]', 'Shared between Notes');
+  await page.waitForSelector('.mark-entry p:has-text("Shared between Notes")');
+  await page.click('.mark-entry .passage');
+  await page.waitForSelector('.ref:has-text("Shared between Notes")');
+  assert.equal(await page.inputValue('.ask textarea'), 'A question I am still writing');
+  assert.equal(await page.locator('[aria-label="Sidebar width"]').getAttribute('aria-valuenow'), '29');
+  await page.fill('.ask textarea','');
+  await page.locator('.volume .pane-title h2').click();
+  await page.keyboard.press('Control+d');
+  const marks = await api(`/api/annotations?book=${epub}`);
+  assert.ok(marks.some((a) => a.kind === 'bookmark'));
+  await page.goto(`${ORIGIN}/#/annotations`);
+  await page.click('.marks-tools button:has-text("Bookmarks")');
+  assert.ok(await page.locator('.mark-entry').count() > 0);
+  const exported = await fetch(`${ORIGIN}/api/annotations/export.md`, { headers: { Cookie: `oma_session=${token}` } });
+  assert.equal(exported.status,200);
+  const markdown = await exported.text();
+  assert.match(markdown,/Shared between Notes and Marks/);
+  assert.match(markdown,/Bookmark/);
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(3600);
+  for (const [name, width, height] of [['desktop',1600,1000],['laptop',1366,768],['narrow',700,1000]]) {
+    await page.setViewportSize({width,height});
+    if (name === 'narrow') await page.click('.side-close');
+    await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
+    await page.screenshot({path:`/tmp/omareader-${name}.png`});
+    if (name === 'narrow') {
+      await page.click('button[title^="Side panes"]');
+      assert.ok(await page.locator('.ask textarea').isVisible());
+      await page.screenshot({path:'/tmp/omareader-narrow-sidebar.png'});
+    }
+  }
+  await page.setViewportSize({width:1600,height:1000});
+  for (const scale of [1.25,1.5]) {
+    const context = await browser.newContext({ viewport:{width:Math.round(1600/scale),height:Math.round(1000/scale)},deviceScaleFactor:scale,storageState:await page.context().storageState() });
+    const scaled = await context.newPage();
+    await scaled.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+    await scaled.waitForSelector('.ask textarea');
+    const composer = await scaled.locator('.ask textarea').boundingBox();
+    assert.ok(composer.y + composer.height <= Math.round(1000/scale));
+    assert.equal(await scaled.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
+    await scaled.screenshot({path:`/tmp/omareader-scale-${scale}.png`});
+    await context.close();
+  }
+  await page.goto(`${ORIGIN}/#/library`);
+  await page.waitForSelector('.cover-grid');
+  await page.screenshot({path:'/tmp/omareader-library.png'});
+  await page.goto(`${ORIGIN}/#/annotations`);
+  await page.waitForSelector('.mark-entry');
+  await page.screenshot({path:'/tmp/omareader-marks.png'});
+  assert.deepEqual(errors,[]);
+});
+
+test('an attached passage survives navigation and failed provider setup preserves the question', async () => {
+  await page.route('**/api/ai/providers', (route) => route.fulfill({json:{providers:[{id:'codex',name:'Test provider',signed_in:true,models:[]}],selected:'codex',model:''}}));
+  await page.setViewportSize({ width:1600,height:1000 });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await page.selectOption('[aria-label="Question scope"]','chapter');
+  const sent = [];
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({contentType:'text/event-stream',body:'data: {"type":"context","context":{"scope":"chapter","partial":true}}\n\ndata: {"type":"delta","text":"Only some passages were supplied. [99]"}\n\ndata: {"type":"done","id":1}\n\n'});
+  });
+  await select(1);
+  await page.click('.pick-menu button[title="Ask Oma"]');
+  assert.equal(sent.length,0);
+  assert.equal(await page.inputValue('[aria-label="Question scope"]'),'chapter');
+  await page.click('.prose a:has-text("Next chapter")');
+  await page.waitForFunction(() => document.querySelector('.prose h1')?.textContent === 'Room for Everyone');
+  await page.fill('.ask textarea','Compare this chapter with my attached passage.');
+  await page.click('[aria-label="Send question"]');
+  await eventually(() => sent.length === 1);
+  assert.equal(sent[0].attachment.block,1);
+  assert.equal(sent[0].chapter,1);
+  await page.waitForSelector('.context-note');
+  assert.equal(await page.locator('[data-cite="99"]').count(),0);
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers');
+  await page.route('**/api/ai/providers', (route) => route.fulfill({json:{providers:[],selected:null,model:''}}));
+  await page.reload();
+  await page.waitForSelector('.prose p');
+  await page.fill('.ask textarea','Keep this question until configuration is ready.');
+  await page.click('[aria-label="Send question"]');
+  await page.waitForSelector('.chat-empty button:has-text("Configure")');
+  assert.equal(await page.inputValue('.ask textarea'),'Keep this question until configuration is ready.');
+  assert.ok(await page.locator('.prose p').first().isVisible());
+  await page.unroute('**/api/ai/providers');
+  assert.deepEqual(errors,[]);
+});
+
+test('resizing the reading column preserves a mid-book location', async () => {
+  writeFileSync(join(data,'reflow.md'), '# A long chapter\n\n' + Array.from({length:100},(_,i) => `Paragraph ${i}. ${'Long-form reading keeps its place when the margin moves. '.repeat(12)}`).join('\n\n'));
+  const id = await upload('reflow.md');
+  await page.setViewportSize({width:1600,height:1000});
+  await page.goto(`${ORIGIN}/#/read/${id}?b=50`);
+  await page.waitForSelector('[data-b="50"]');
+  await eventually(async () => (await api(`/api/books/${id}`)).position?.block === 50);
+  await page.locator('[aria-label="Sidebar width"]').focus();
+  for (let n=0;n<12;n++) await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(900);
+  assert.equal((await api(`/api/books/${id}`)).position.block,50);
+  const pdfId = await upload('mixed-pages.pdf');
+  await page.goto(`${ORIGIN}/#/read/${pdfId}?b=0&p=2`);
+  await page.waitForSelector('.pdf-page canvas');
+  await eventually(async () => (await api(`/api/books/${pdfId}`)).position?.page === 2);
+  await page.locator('[aria-label="Sidebar width"]').focus();
+  for (let n=0;n<10;n++) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(900);
+  assert.equal((await api(`/api/books/${pdfId}`)).position.page,2);
 });

@@ -49,7 +49,7 @@ export function Annotations() {
       {groups.map((list) => <section className="mark-group" key={list[0].book_id}>
         <header><h2>{list[0].book_title}</h2><span>{list[0].book_author}</span><a className="ghost" href={urls.notesMarkdown(list[0].book_id)} download><FileText size={13} /> .md</a></header>
         {list.map((item) => <article key={item.id} className="mark-entry">
-          <button className="passage" onClick={() => navigate(`read/${item.book_id}?b=${item.block}&p=${item.page}`)}>
+          <button className="passage" onClick={() => navigate(`read/${item.book_id}?b=${item.block}&p=${item.kind === 'bookmark' ? item.page : 0}`)}>
             <small>{item.kind === 'bookmark' ? 'Bookmark · ' : ''}{item.chapter || 'Location'} · {item.page ? `p. ${item.page}` : `Location ${item.block + 1}`}</small>
             {item.quote && <blockquote>{item.quote}</blockquote>}{item.note && <p>{item.note}</p>}
           </button>

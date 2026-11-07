@@ -15,12 +15,12 @@ export function Margin({ book, annotations, block, bookmarks, tab, setTab, go, r
   bookmarks: Annotation[];
   tab: MarginTab;
   setTab: (tab: MarginTab) => void;
-  go: (block: number, flash?: boolean) => void;
+  go: (block: number, flash?: boolean, page?: number) => void;
   reload: () => void;
   onEdit: (annotation: Annotation, rect: DOMRect) => void;
 }) {
   const tools = (['margin', 'index', 'notebook'] as MarginTab[]).map((name) => (
-    <button key={name} className={`tab ${tab === name ? 'on' : ''}`} onClick={() => setTab(name)}>{name}</button>
+    <button key={name} className={`tab ${tab === name ? 'on' : ''}`} onClick={() => setTab(name)}>{({ margin: 'Notes', index: 'Chapters', notebook: 'Saved' })[name]}</button>
   ));
   return (
     <Pane title="Notes" tools={tools} className="margin-pane">
@@ -34,7 +34,7 @@ export function Margin({ book, annotations, block, bookmarks, tab, setTab, go, r
 /** Chapter context is a stable location-ordered view of the shared annotation records. */
 function Refs({ book, annotations, block, go, onEdit }: {
   book: BookDetail; annotations: Annotation[]; block: number;
-  go: (block: number, flash?: boolean) => void;
+  go: (block: number, flash?: boolean, page?: number) => void;
   onEdit: (annotation: Annotation, rect: DOMRect) => void;
 }) {
   const chapter = book.chapters.findLast((c) => c.start <= block);
@@ -42,7 +42,7 @@ function Refs({ book, annotations, block, go, onEdit }: {
   const nearest = items.reduce<Annotation | null>((best,a) => !best || Math.abs(a.block-block) < Math.abs(best.block-block) ? a : best, null);
   return <div className="chapter-notes">
     {items.map((note) => <div className={`chapter-note ${note.id === nearest?.id ? 'near' : ''}`} key={note.id}>
-      <button className="ref" onClick={() => go(note.block)}>
+      <button className="ref" onClick={() => go(note.block, true, note.kind === 'bookmark' ? note.page : undefined)}>
         <small>{note.page ? `p. ${note.page}` : `Location ${note.block + 1}`}{note.kind === 'bookmark' ? ' · Bookmark' : note.note ? ' · Note' : ' · Highlight'}</small>
         <span>{note.note || note.quote || 'Bookmark'}</span>
       </button>
@@ -52,7 +52,7 @@ function Refs({ book, annotations, block, go, onEdit }: {
   </div>;
 }
 
-function Index({ book, block, bookmarks, go }: { book: BookDetail; block: number; bookmarks: Annotation[]; go: (block: number, flash?: boolean) => void }) {
+function Index({ book, block, bookmarks, go }: { book: BookDetail; block: number; bookmarks: Annotation[]; go: (block: number, flash?: boolean, page?: number) => void }) {
   const current = book.toc.findLastIndex((t) => t.block <= block);
   const active = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -61,7 +61,7 @@ function Index({ book, block, bookmarks, go }: { book: BookDetail; block: number
   return (
     <div className="index">
       {book.toc.map((entry, i) => (
-        <button key={entry.idx} ref={i === current ? active : undefined} className={`level-${Math.min(entry.level, 3)} ${i === current ? 'current' : ''}`} onClick={() => go(entry.block, false)}>
+        <button key={entry.idx} ref={i === current ? active : undefined} className={`level-${Math.min(entry.level, 3)} ${i === current ? 'current' : ''}`} onClick={() => go(entry.block, false, entry.page)}>
           <span>{entry.title}</span>
           {entry.page > 0 && <small>{entry.page}</small>}
         </button>
@@ -69,7 +69,7 @@ function Index({ book, block, bookmarks, go }: { book: BookDetail; block: number
       {book.toc.length === 0 && <p className="hint">no chapters found.</p>}
       {bookmarks.length > 0 && <h3>BOOKMARKS</h3>}
       {bookmarks.map((mark) => (
-        <button key={mark.id} onClick={() => go(mark.block, false)}>
+        <button key={mark.id} onClick={() => go(mark.block, false, mark.page)}>
           <span>{mark.quote || 'bookmark'}</span>
           {mark.page > 0 && <small>{mark.page}</small>}
         </button>

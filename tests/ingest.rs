@@ -193,4 +193,44 @@ fn long_chapter_questions_retrieve_relevant_passages_before_sampling() {
     assert!(prompt.prompt.contains("turquoise walrus"));
     assert!(!prompt.prompt.contains("crimson sparrow"));
     assert!(prompt.prompt.len() < 62_000);
+    assert!(prompt.partial);
+}
+
+#[test]
+fn attached_passage_keeps_its_source_while_chapter_scope_changes() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("attached.md");
+    std::fs::write(&file, "# Harbor\n\nThe keeper is Mara.\n\n# Observatory\n\nThe keeper is Ivo.\n").unwrap();
+    let id = ingest::import_path(&db, &paths, &file).unwrap();
+    let mut request = retrieval::AskRequest { question: "Compare these keepers".into(), scope: Some("chapter".into()), chapter: Some(1), attachment: Some(retrieval::SelectionContext { text: "The keeper is Mara.".into(), block: 1, end_block: 1 }), ..Default::default() };
+    let prompt = retrieval::build(&db, &id, &request, &[]).unwrap();
+    assert_eq!(prompt.citations[0].block, 1);
+    assert_eq!(prompt.citations[0].quote, "The keeper is Mara.");
+    assert!(prompt.citations.iter().any(|c| c.quote.contains("Ivo")));
+    assert!(!prompt.partial);
+    request.attachment.as_mut().unwrap().block = 3;
+    request.attachment.as_mut().unwrap().end_block = 3;
+    assert!(retrieval::build(&db, &id, &request, &[]).is_err());
+}
+
+#[test]
+fn conversation_context_migration_preserves_existing_library_and_messages() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("kept.md");
+    std::fs::write(&file, "# Kept book\n\nExisting text stays here.\n").unwrap();
+    let id = ingest::import_path(&db, &paths, &file).unwrap();
+    {
+        let conn = db.conn();
+        conn.execute("INSERT INTO chats(id,book_id,created_at,updated_at) VALUES('old',?1,1,1)", [&id]).unwrap();
+        conn.execute("INSERT INTO messages(chat_id,role,content,created_at) VALUES('old','user','Keep this question',1)", []).unwrap();
+        conn.execute_batch("ALTER TABLE messages DROP COLUMN context; PRAGMA user_version=1;").unwrap();
+    }
+    drop(db);
+    let reopened = Db::open(&paths.db).unwrap();
+    let conn = reopened.conn();
+    let (content, context): (String, String) = conn.query_row("SELECT content,context FROM messages WHERE chat_id='old'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(content, "Keep this question");
+    assert_eq!(context, "{}");
+    let count: u32 = conn.query_row("SELECT count(*) FROM blocks WHERE book_id=?1", [&id], |r| r.get(0)).unwrap();
+    assert!(count > 0);
 }

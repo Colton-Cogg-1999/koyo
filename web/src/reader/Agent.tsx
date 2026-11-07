@@ -15,7 +15,7 @@ const COMMANDS: Record<string, { question: string; label: string; scope?: 'chapt
 };
 
 function Answer({ message, go, onSave }: { message: Message; go: (block: number) => void; onSave: () => void }) {
-  const html = useMemo(() => renderMarkdown(message.content, true), [message.content]);
+  const html = useMemo(() => renderMarkdown(message.content, message.citations.map((c) => c.n)), [message.content, message.citations]);
   const byNumber = useMemo(() => new Map<string, Citation>(message.citations.map((c) => [String(c.n), c])), [message.citations]);
   return (
     <div className="answer">
@@ -36,7 +36,7 @@ function Answer({ message, go, onSave }: { message: Message; go: (block: number)
       />
       {message.error && <p className="error" role="alert">{message.error}</p>}
       {message.context?.partial && <p className="context-note">Based on retrieved excerpts; coverage is partial.</p>}
-      {message.content && <button className="save" title="Save answer to notebook" onClick={onSave}><BookmarkPlus size={13} /> Save to Marks</button>}
+      {message.content && <button className="save" title="Save answer to Marks" onClick={onSave}><BookmarkPlus size={13} /> Save to Marks</button>}
     </div>
   );
 }
@@ -55,10 +55,10 @@ export function Agent({ book, location, seed, go, onSelectionClear }: { onSelect
   const [chapter, setChapter] = useState<string>(draft.chapter ?? 'current');
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState(false);
-  const [large, setLarge] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (field.current) { field.current.style.height = 'auto'; field.current.style.height = `${Math.min(140, Math.max(32, field.current.scrollHeight))}px`; } }, [input]);
   const handled = useRef(0);
   const follow = useRef(true);
   const [needsProvider, setNeedsProvider] = useState(false);
@@ -218,7 +218,7 @@ export function Agent({ book, location, seed, go, onSelectionClear }: { onSelect
 
   return (
     <Pane
-      className={`agent ${large ? 'large' : ''}`}
+      className="agent"
       title="Ask this book"
       tools={
         <>
@@ -230,7 +230,6 @@ export function Agent({ book, location, seed, go, onSelectionClear }: { onSelect
       {menu && (
         <div ref={options} id="chat-options" className="popover provider-menu chat-options" role="dialog" aria-label="Chat options">
           <div className="chat-options-heading"><span>Chat options</span><button className="icon" aria-label="Close chat options" onClick={() => setMenu(false)}><X size={14} /></button></div>
-          <button className="ghost" onClick={() => { setLarge(!large); setMenu(false); }}>{large ? 'Restore panel size' : 'Expand conversation'}</button>
           {chats.length > 0 && <label className="conversation-picker">Conversations
             <select disabled={busy} aria-label="Conversation" value={chat ?? ''} onChange={(event) => { setChat(event.target.value || null); setMenu(false); }}>
               <option value="">New conversation</option>
@@ -247,16 +246,18 @@ export function Agent({ book, location, seed, go, onSelectionClear }: { onSelect
         </div>
       )}
       <div className="question-scope">
-        <select aria-label="Question scope" title="Choose what to ask about" disabled={busy} value={scope} onChange={(event) => setScope(event.target.value as AskBody['scope'])}>
+        <select aria-label="Question scope" title="Choose what to ask about" disabled={busy} value={scope === 'chapter' && chapter !== 'current' ? `chapter:${chapter}` : scope} onChange={(event) => {
+          const value = event.target.value;
+          if (value.startsWith('chapter:')) { setScope('chapter'); setChapter(value.slice(8)); }
+          else { setScope(value as AskBody['scope']); if (value === 'chapter') setChapter('current'); }
+        }}>
           {location && <option value="page">{book.format === 'pdf' ? `This page · ${location.page}` : 'Visible passages'}</option>}
           <option value="selection" disabled={!selection}>Selected text</option>
           <option value="chapter">This chapter</option>
           <option value="search">This book</option>
+          <optgroup label="A specific chapter">{book.chapters.map((c) => <option key={c.idx} value={`chapter:${c.idx}`}>{c.title}</option>)}</optgroup>
         </select>
-        {scope === 'chapter' && <select aria-label="Question chapter" disabled={busy} value={chapter} onChange={(event) => setChapter(event.target.value)}>
-          <option value="current">{location ? 'Current chapter' : 'First chapter'}</option>
-          {book.chapters.map((c) => <option key={c.idx} value={c.idx}>{c.title}</option>)}
-        </select>}
+
       </div>
       <div className="chat-log" ref={log} onScroll={() => { const box = log.current; if (box) follow.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48; }}>
         {needsProvider && usable.length === 0 && (

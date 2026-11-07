@@ -112,6 +112,9 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
   const located = useRef(new Map<number, BlockLocation>());
   const pageBlocks = useRef(new Map<number, BlockLocation[]>());
   const applied = useRef(0);
+  const readingAnchor = useRef<{page:number; fraction:number} | null>(null);
+  const resizeAnchor = useRef<{page:number; fraction:number} | null>(null);
+  const measuredWidth = useRef(0);
   const pageCount = doc?.numPages ?? book.pages;
 
   useEffect(() => {
@@ -141,7 +144,13 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
   useLayoutEffect(() => {
     const box = scroller.current;
     if (!box) return;
-    const measure = () => setWidth(Math.min(1400, Math.max(320, box.clientWidth - 112)) * prefs.zoom);
+    const measure = () => {
+      const next = Math.min(1400, Math.max(320, box.clientWidth - 112)) * prefs.zoom;
+      if (next === measuredWidth.current) return;
+      if (measuredWidth.current) resizeAnchor.current = readingAnchor.current;
+      measuredWidth.current = next;
+      setWidth(next);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(box);
@@ -167,6 +176,7 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     const bounds = current.getBoundingClientRect();
     const page = Number(current.dataset.page);
     const fraction = Math.max(0, Math.min(1, (readingLine - bounds.top) / bounds.height));
+    readingAnchor.current = { page, fraction };
     const low = Math.max(1, page - 2);
     const high = Math.min(pageCount, page + 3);
     setVisible((current) => {
@@ -196,6 +206,12 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     box.scrollTop += rect.top - box.getBoundingClientRect().top - 24 + fraction * rect.height;
   }, []);
 
+  useLayoutEffect(() => {
+    if (resizeAnchor.current) {
+      scrollToPage(resizeAnchor.current.page, resizeAnchor.current.fraction);
+      resizeAnchor.current = null;
+    }
+  }, [width, scrollToPage]);
   useEffect(report, [annotations, width, doc]);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
@@ -252,7 +268,7 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).closest('input,textarea,[contenteditable]')) return;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || (event.target as HTMLElement).closest('input,textarea,select,button,[contenteditable],[role=dialog],[role=separator]')) return;
       const box = scroller.current;
       if (!box) return;
       if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {

@@ -27,7 +27,8 @@ function samePositions(a: NotePositions, b: NotePositions) {
   return true;
 }
 export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: string; startBlock: number | null; startPage: number | null; focus: boolean; setFocus: (on: boolean) => void }) {
-  const [book, , setBook] = useAsync(() => api.book(id), [id]);
+  const [loadError, setLoadError] = useState(false);
+  const [book, , setBook] = useAsync(() => api.book(id).catch((error) => { setLoadError(true); throw error; }), [id]);
   const [annotations, reloadAnnotations, setAnnotations] = useAsync(() => api.annotations({ book: id }), [id]);
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
   const [location, setLocation] = useState<Location>({ block: 0, fraction: 0, page: 1, ratio: 0 });
@@ -60,9 +61,9 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
     api.settings().then((s) => s.reader && setPrefs({ ...defaultPrefs, ...(s.reader as Partial<ReaderPrefs>) })).catch(() => {});
   }, []);
 
-  const go = useCallback((block: number, flash = true) => {
+  const go = useCallback((block: number, flash = true, page?: number) => {
     setReturnTo(currentLocation.current);
-    setJump({ block, flash, nonce: ++nonce.current });
+    setJump({ block, flash, page: page || undefined, nonce: ++nonce.current });
   }, []);
 
   useEffect(() => {
@@ -220,6 +221,7 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
     return () => window.clearTimeout(timer);
   }, [undoMark]);
 
+  if (loadError) return <div className="reader-loading">This book could not be opened. <button className="ghost" onClick={() => navigate('library')}>Back to Library</button></div>;
   if (!book || !jump) return <div className="reader-loading">loading…</div>;
   if (book.status !== 'ready') {
     return <div className="reader-loading">{book.status === 'failed' ? book.error : 'indexing…'}</div>;
@@ -234,7 +236,7 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
     <div className={`reader ${focus ? 'zen' : ''}`}>
       <Pane
         className="volume"
-        title={<>{book.title}<i>{chapter && chapter !== book.title ? `${chapter} · ` : ''}{Math.round(location.ratio * 100)}%</i></>}
+        title={<>{book.title}<i> · {chapter && chapter !== book.title ? `${chapter} · ` : ''}{Math.round(location.ratio * 100)}%</i></>}
         tools={
           <>
             <button className="icon" title="Library" onClick={() => navigate('library')}><ArrowLeft size={16} /></button>
@@ -369,7 +371,7 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
           <button key={color} className={`swatch ${color} ${annotation.color === color ? 'on' : ''}`} title={color} onClick={() => void onSave({ color }).catch(failure)} />
         ))}
         <span />
-        <button className="icon" title="Remove" disabled={saving} onClick={() => void onDelete().then(() => localStorage.removeItem(draftKey)).catch(failure)}><Trash2 size={15} /></button>
+        <button className="icon" title="Remove" disabled={saving} onClick={() => { if (window.confirm('Delete this annotation and its note?')) void onDelete().then(() => localStorage.removeItem(draftKey)).catch(failure); }}><Trash2 size={15} /></button>
         <button className="tab" disabled={saving} onClick={onClose}>Cancel</button>
         <button className="solid" disabled={saving} onClick={() => void close()}>{saving ? 'saving…' : 'save'}</button>
       </footer>

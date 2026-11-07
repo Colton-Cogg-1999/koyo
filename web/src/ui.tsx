@@ -88,7 +88,7 @@ export function Toasts() {
   const items = useSyncExternalStore((l) => (toastListeners.add(l), () => void toastListeners.delete(l)), () => toasts);
   return (
     <div className="toasts" role="status">
-      {items.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.tone === 'error' ? 'ERR> ' : '>>> '}{t.text}</div>)}
+      {items.map((t) => <div key={t.id} className={`toast ${t.tone}`}>{t.text}</div>)}
     </div>
   );
 }

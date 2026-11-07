@@ -62,6 +62,8 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
   const blocks = useRef<HTMLElement[]>([]);
   const pending = useRef<Jump | null>(null);
   const frame = useRef(0);
+  const readingAnchor = useRef<{ block: number; fraction: number } | null>(null);
+  const measuredWidth = useRef(0);
 
   const sectionFor = useCallback(
     (block: number) => book.sections.find((s) => block >= s.first_block && block <= s.last_block) ?? book.sections[0],
@@ -121,6 +123,9 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     const box = scroller.current;
     const list = blocks.current;
     if (!box || !list.length) return;
+    const width = paper.current?.clientWidth ?? 0;
+    if (measuredWidth.current && width !== measuredWidth.current && readingAnchor.current) reveal({ ...readingAnchor.current, nonce: 0 });
+    measuredWidth.current = width;
     const top = box.getBoundingClientRect().top + READING_LINE;
     let low = 0;
     let high = list.length - 1;
@@ -133,6 +138,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     const rect = element.getBoundingClientRect();
     const fraction = rect.height ? Math.max(0, (top - rect.top) / rect.height) : 0;
     const seq = Number(element.dataset.b);
+    readingAnchor.current = { block: seq, fraction };
     const last = book.sections.at(-1)?.last_block ?? 1;
     const bottom = box.getBoundingClientRect().bottom;
     const visible = list.filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.getBoundingClientRect().top && r.top < bottom; });
@@ -235,7 +241,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
       box.scrollBy({ top: direction * (box.clientHeight - 72), behavior: 'smooth' });
     };
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement).closest('input,textarea,[contenteditable]')) return;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || (event.target as HTMLElement).closest('input,textarea,select,button,[contenteditable],[role=dialog],[role=separator]')) return;
       if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {
         event.preventDefault();
         scrollPage(event.shiftKey ? -1 : 1);
@@ -263,17 +269,17 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
         frame.current ||= requestAnimationFrame(report);
       }}
     >
-      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in the book notebook; reselect the passage to attach a new highlight.</p>}
+      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in Marks; reselect the passage to attach a new highlight.</p>}
       <article className={`paper font-${prefs.font}`} style={style}>
         <div className="paper-body" ref={paper} onMouseUp={onMouseUp} onClick={onClick}>
           {section && <Prose html={section.html} />}
           {next ? (
             <button className="next-chapter" onClick={() => onJump(next.first_block)}>
-              <span>&gt;&gt;&gt; next</span>
+              <span>Next chapter</span>
               <strong>{next.title || 'next section'}</strong>
             </button>
           ) : (
-            section && <div className="the-end">[ EOF ]</div>
+            section && <div className="the-end">End of book</div>
           )}
         </div>
       </article>
