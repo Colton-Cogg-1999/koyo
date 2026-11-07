@@ -61,6 +61,10 @@ export interface BookDetail extends Book {
 }
 
 export interface TextAnchor {
+  version?: 1;
+  exact?: string;
+  prefix?: string;
+  suffix?: string;
   kind: 'text';
   startBlock: number;
   startOffset: number;

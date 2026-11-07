@@ -680,3 +680,4 @@ select option, select optgroup { background: var(--pane); color: var(--fg); }
 .study { display: flex; flex-direction: column; height: 100%; gap: var(--gap); min-height: 0; }
 .study-title { display: flex; gap: 16px; align-items: center; }
 .study .agent { min-height: 0; }
+.annotation-warning { margin: 8px; padding: 10px; border: 1px solid var(--yellow); color: var(--fg); font-size: 13px; }

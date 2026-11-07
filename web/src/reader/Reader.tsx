@@ -328,14 +328,31 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
   onSave: (patch: { color?: string; note?: string }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
-  const [note, setNote] = useState(annotation.note);
+  const draftKey = `omareader:passage-draft:${annotation.book_id}:${annotation.id}`;
+  const [note, setNote] = useState(() => {
+    try { return localStorage.getItem(draftKey) ?? annotation.note; } catch { return annotation.note; }
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const changeNote = (value: string) => {
+    setNote(value);
+    try { localStorage.setItem(draftKey, value); } catch { setError('Draft could not be stored locally. Save before closing.'); }
+  };
   const box = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     box.current?.focus();
   }, []);
   const close = async () => {
-    if (note !== annotation.note) await onSave({ note }).catch(failure);
-    onClose();
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      if (note !== annotation.note) await onSave({ note });
+      try { localStorage.removeItem(draftKey); } catch { /* the server has saved it */ }
+      onClose();
+    } catch (error) {
+      setError(`Save failed: ${(error as Error).message}. Your draft is kept here.`);
+    } finally { setSaving(false); }
   };
   const top = Math.max(60, Math.min(window.innerHeight - 270, rect.bottom + 10));
   const left = Math.max(14, Math.min(window.innerWidth - 400, rect.left - 40));
@@ -346,7 +363,8 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
         ref={box}
         value={note}
         placeholder=">>> note"
-        onChange={(event) => setNote(event.target.value)}
+        disabled={saving}
+        onChange={(event) => changeNote(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void close();
           if (event.key === 'Escape') {
@@ -355,13 +373,14 @@ function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
           }
         }}
       />
+      {error && <p className="error" role="status">{error}</p>}
       <footer>
         {COLORS.map((color) => (
           <button key={color} className={`swatch ${color} ${annotation.color === color ? 'on' : ''}`} title={color} onClick={() => void onSave({ color }).catch(failure)} />
         ))}
         <span />
-        <button className="icon" title="Remove" onClick={() => void onDelete().catch(failure)}><Trash2 size={15} /></button>
-        <button className="solid" onClick={() => void close()}>save</button>
+        <button className="icon" title="Remove" disabled={saving} onClick={() => void onDelete().then(() => localStorage.removeItem(draftKey)).catch(failure)}><Trash2 size={15} /></button>
+        <button className="solid" disabled={saving} onClick={() => void close()}>{saving ? 'saving…' : 'save'}</button>
       </footer>
     </div>
   );

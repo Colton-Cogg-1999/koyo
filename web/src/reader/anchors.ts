@@ -21,14 +21,14 @@ export function offsetIn(block: HTMLElement, node: Node, offset: number) {
 }
 
 function pointAt(block: HTMLElement, offset: number): [Text, number] | null {
+  if (!Number.isInteger(offset) || offset < 0) return null;
   let left = offset;
   const nodes = textNodes(block);
   for (const node of nodes) {
     if (left <= node.length) return [node, left];
     left -= node.length;
   }
-  const last = nodes.at(-1);
-  return last ? [last, last.length] : null;
+  return null;
 }
 
 export function anchorFromSelection(selection: Selection): { anchor: TextAnchor; quote: string; rect: DOMRect } | null {
@@ -40,6 +40,10 @@ export function anchorFromSelection(selection: Selection): { anchor: TextAnchor;
   if (!quote || !startBlock || !endBlock) return null;
   const anchor: TextAnchor = {
     kind: 'text',
+    version: 1,
+    exact: range.toString(),
+    prefix: (startBlock.textContent ?? '').slice(Math.max(0, offsetIn(startBlock, range.startContainer, range.startOffset) - 48), offsetIn(startBlock, range.startContainer, range.startOffset)),
+    suffix: (endBlock.textContent ?? '').slice(offsetIn(endBlock, range.endContainer, range.endOffset), offsetIn(endBlock, range.endContainer, range.endOffset) + 48),
     startBlock: Number(startBlock.dataset.b),
     startOffset: offsetIn(startBlock, range.startContainer, range.startOffset),
     endBlock: Number(endBlock.dataset.b),
@@ -48,16 +52,38 @@ export function anchorFromSelection(selection: Selection): { anchor: TextAnchor;
   return { anchor, quote, rect: range.getBoundingClientRect() };
 }
 
-export function rangeFor(root: HTMLElement, anchor: TextAnchor) {
+const normalized = (s: string) => s.replace(/\s+/g, ' ').trim();
+
+export function rangeFor(root: HTMLElement, anchor: TextAnchor, quote?: string) {
   const start = root.querySelector<HTMLElement>(`[data-b="${anchor.startBlock}"]`);
   const end = root.querySelector<HTMLElement>(`[data-b="${anchor.endBlock}"]`);
   if (!start || !end) return null;
   const from = pointAt(start, anchor.startOffset);
   const to = pointAt(end, anchor.endOffset);
-  if (!from || !to) return null;
+  const expected = anchor.exact ?? quote;
+  if (from && to) {
+    const range = document.createRange();
+    range.setStart(from[0], from[1]);
+    range.setEnd(to[0], to[1]);
+    if (!range.collapsed && (!expected || normalized(range.toString()) === normalized(expected))) return range;
+  }
+  // Recover only an unambiguous match within the original block. Never guess
+  // between repeated passages or silently clamp an obsolete position.
+  if (start !== end || !expected) return null;
+  const text = start.textContent ?? '';
+  const matches: number[] = [];
+  for (let at = text.indexOf(expected); at >= 0; at = text.indexOf(expected, at + 1)) {
+    if (anchor.prefix && !text.slice(0, at).endsWith(anchor.prefix)) continue;
+    if (anchor.suffix && !text.slice(at + expected.length).startsWith(anchor.suffix)) continue;
+    matches.push(at);
+  }
+  if (matches.length !== 1) return null;
+  const recoveredFrom = pointAt(start, matches[0]);
+  const recoveredTo = pointAt(end, matches[0] + expected.length);
+  if (!recoveredFrom || !recoveredTo) return null;
   const range = document.createRange();
-  range.setStart(from[0], from[1]);
-  range.setEnd(to[0], to[1]);
+  range.setStart(...recoveredFrom);
+  range.setEnd(...recoveredTo);
   return range;
 }
 
@@ -83,7 +109,7 @@ export function paintAnnotations(root: HTMLElement, annotations: Annotation[]) {
     for (const annotation of annotations) {
       if (annotation.kind !== 'highlight' || annotation.color !== color) continue;
       const anchor = parseAnchor(annotation);
-      const range = anchor?.kind === 'text' ? rangeFor(root, anchor) : null;
+      const range = anchor?.kind === 'text' ? rangeFor(root, anchor, annotation.quote) : null;
       if (range) ranges.push(range);
     }
     setHighlight(`oma-${color}`, ranges);
@@ -113,12 +139,12 @@ export function annotationAt(x: number, y: number, annotations: Annotation[]) {
   if (!caret) return null;
   const block = blockOf(caret.offsetNode);
   if (!block) return null;
-  const seq = Number(block.dataset.b);
-  const offset = offsetIn(block, caret.offsetNode, caret.offset);
-  const compare = (b1: number, o1: number, b2: number, o2: number) => (b1 - b2) || (o1 - o2);
+  const root = block.closest<HTMLElement>('.paper-body');
+  if (!root) return null;
   return annotations.find((annotation) => {
     const anchor = parseAnchor(annotation);
     if (annotation.kind !== 'highlight' || anchor?.kind !== 'text') return false;
-    return compare(anchor.startBlock, anchor.startOffset, seq, offset) <= 0 && compare(seq, offset, anchor.endBlock, anchor.endOffset) <= 0;
+    const range = rangeFor(root, anchor, annotation.quote);
+    return range?.isPointInRange(caret.offsetNode, caret.offset) ?? false;
   }) ?? null;
 }

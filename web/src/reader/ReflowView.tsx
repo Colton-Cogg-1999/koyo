@@ -55,6 +55,7 @@ const Prose = memo(function Prose({ html }: { html: string }) {
 });
 
 export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, onPick, onHit, onJump, onNotes }: ViewProps) {
+  const [unresolved, setUnresolved] = useState(0);
   const [section, setSection] = useState<SectionData | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const paper = useRef<HTMLDivElement>(null);
@@ -108,7 +109,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     const positions: NotePositions = new Map();
     for (const note of noted.current) {
       const anchor = parseAnchor(note);
-      const range = anchor?.kind === 'text' ? rangeFor(root, anchor) : null;
+      const range = anchor?.kind === 'text' ? rangeFor(root, anchor, note.quote) : null;
       const line = range?.getClientRects()[0];
       if (line) positions.set(note.id, { x: line.right, y: line.top });
     }
@@ -154,7 +155,13 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
   }, [section]);
 
   useLayoutEffect(() => {
-    if (paper.current && section) paintAnnotations(paper.current, annotations);
+    if (paper.current && section) {
+      paintAnnotations(paper.current, annotations);
+      setUnresolved(annotations.filter((a) => {
+        const anchor = parseAnchor(a);
+        return anchor?.kind === 'text' && anchor.startBlock >= section.first_block && anchor.startBlock <= section.last_block && !rangeFor(paper.current!, anchor, a.quote);
+      }).length);
+    }
   }, [annotations, section]);
 
   useEffect(() => () => { clearPaint(); cancelAnimationFrame(frame.current); }, []);
@@ -256,6 +263,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
         frame.current ||= requestAnimationFrame(report);
       }}
     >
+      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in the margin; reselect the passage to attach a new highlight.</p>}
       <article className={`paper font-${prefs.font}`} style={style}>
         <div className="paper-body" ref={paper} onMouseUp={onMouseUp} onClick={onClick}>
           {section && <Prose html={section.html} />}

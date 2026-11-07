@@ -391,3 +391,93 @@ test('live AI answers page, selection, and chosen chapter questions from the cor
     });
   }
 });
+
+test('EPUB passage notes survive reflow and failed saves retain a recoverable draft', async () => {
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await select(2);
+  const quote = (await page.locator('[data-b="2"]').textContent()).trim();
+  await page.click('.pick-menu button[title="Add a note"]');
+  await page.fill('.note-editor textarea', 'Reflow must keep this passage.');
+  await page.route('**/api/annotations/*', (route) => route.request().method() === 'PATCH' ? route.fulfill({ status: 500, json: { error: 'disk unavailable' } }) : route.continue());
+  await page.click('.note-editor .solid');
+  await page.waitForSelector('.note-editor [role="status"]:has-text("Save failed")');
+  assert.equal(await page.inputValue('.note-editor textarea'), 'Reflow must keep this passage.');
+  await page.reload();
+  await page.waitForSelector('.prose p');
+  // Open the saved highlight through the margin, including its unsaved local draft.
+  await page.click('.tab:has-text("margin")');
+  const annotations = await api(`/api/annotations?book=${epub}`);
+  const annotation = annotations.find((a) => a.quote === quote);
+  assert.ok(annotation);
+  const point = await page.locator('[data-b="2"]').evaluate((element) => { const r = document.createRange(); r.selectNodeContents(element); const box = r.getClientRects()[0]; return { x: box.left + 10, y: box.top + box.height / 2 }; });
+  await page.mouse.click(point.x, point.y);
+  await page.waitForSelector('.note-editor');
+  assert.equal(await page.inputValue('.note-editor textarea'), 'Reflow must keep this passage.');
+  await page.unroute('**/api/annotations/*');
+  await page.click('.note-editor .solid');
+  await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.note === 'Reflow must keep this passage.'));
+  for (const [font, size, leading, width, viewport] of [
+    ['literata', 28, 2, 28, { width: 1100, height: 800 }],
+    ['sans', 13, 1.3, 60, { width: 1600, height: 1000 }],
+    ['newsreader', 22, 1.7, 36, { width: 900, height: 1200 }],
+  ]) {
+    await api('/api/settings', 'PUT', { reader: { font, size, leading, width } });
+    await page.setViewportSize(viewport);
+    await page.reload();
+    await page.waitForSelector('.prose p');
+    await eventually(async () => page.evaluate((q) => [...(CSS.highlights.get('oma-blue') ?? [])].some((r) => r.toString().trim() === q), quote));
+    assert.ok((await api(`/api/annotations?book=${epub}`)).some((a) => a.id === annotation.id && a.note === 'Reflow must keep this passage.'));
+  }
+  await page.setViewportSize({ width: 1600, height: 900 });
+});
+
+test('PDF notes keep normalized geometry through zoom and reopening', async () => {
+  const id = await upload('mixed-pages.pdf');
+  await page.goto(`${ORIGIN}/#/read/${id}?b=0`);
+  await page.waitForFunction(() => document.querySelector('.textLayer')?.textContent.includes('open reading guide'));
+  await page.locator('[data-page="1"] .textLayer').evaluate((layer) => {
+    const span = [...layer.querySelectorAll('span')].find((s) => s.textContent.includes('Books belong'));
+    const range = document.createRange(); range.selectNodeContents(span);
+    getSelection().removeAllRanges(); getSelection().addRange(range);
+    span.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+  await page.click('.pick-menu button[title="Add a note"]');
+  await page.fill('.note-editor textarea', 'PDF geometry stays put.');
+  await page.click('.note-editor .solid');
+  await eventually(async () => (await api(`/api/annotations?book=${id}`)).some((a) => a.note === 'PDF geometry stays put.'));
+  const saved = (await api(`/api/annotations?book=${id}`))[0];
+  const rect = JSON.parse(saved.anchor).rects[0];
+  for (const zoom of [.65, 1.65]) {
+    await api('/api/settings', 'PUT', { reader: { zoom } });
+    await page.reload();
+    await page.waitForSelector('[data-page="1"] .pdf-mark');
+    const normalized = await page.locator('[data-page="1"] .pdf-mark').first().evaluate((mark) => {
+      const parent = mark.closest('.pdf-page').getBoundingClientRect(), r = mark.getBoundingClientRect();
+      return [(r.left-parent.left)/parent.width, (r.top-parent.top)/parent.height, r.width/parent.width, r.height/parent.height];
+    });
+    normalized.forEach((v, i) => assert.ok(Math.abs(v - rect[i+1]) < .003));
+    assert.equal((await api(`/api/annotations?book=${id}`))[0].note, 'PDF geometry stays put.');
+  }
+  assert.deepEqual(errors, []);
+});
+
+test('stale EPUB offsets recover by quote or visibly refuse an unsafe attachment', async () => {
+  let damaged = false;
+  await page.route(`**/api/books/${epub}/sections/*`, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.html = body.html.replace(/(<p[^>]*data-b="2"[^>]*>)([\s\S]*?)(<\/p>)/, (_, open, text, close) => open + (damaged ? 'This paragraph was replaced.' : 'Inserted before the original. ' + text) + close);
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await eventually(async () => page.evaluate(() => [...(CSS.highlights.get('oma-blue') ?? [])].some((r) => r.toString().startsWith('A book on your disk'))));
+  damaged = true;
+  await page.reload();
+  await page.waitForSelector('.annotation-warning');
+  const highlights = await page.evaluate(() => [...(CSS.highlights.get('oma-blue') ?? [])].map((r) => r.toString()));
+  assert.ok(!highlights.some((text) => text.includes('This paragraph was replaced')));
+  assert.ok((await api(`/api/annotations?book=${epub}`)).some((a) => a.note === 'Reflow must keep this passage.'));
+  await page.unroute(`**/api/books/${epub}/sections/*`);
+});
