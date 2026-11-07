@@ -165,6 +165,7 @@ export function Settings() {
                 <dt>data</dt><dd><code>{storage.data_dir}</code></dd>
                 <dt>notes</dt><dd><code>{storage.notes_dir}</code> <span className="hint">mirrored as markdown on every change</span></dd>
               </dl>
+              <p className="hint">For a checked backup, close the app and run <code>omareader backup /path/to/new-backup</code>. Restore into a new folder with <code>omareader restore /path/to/backup /path/to/new-library</code>. Set <code>OMAREADER_DATA_DIR</code> to the restored folder when launching. Backups include generated audio; voice models download again. Existing folders are never overwritten.</p>
               <table className="sizes">
                 <tbody>
                   <tr><td>books</td><td>{bytes(storage.books_bytes)}</td></tr>

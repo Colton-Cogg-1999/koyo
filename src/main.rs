@@ -14,7 +14,7 @@ const DEFAULT_PORT: u16 = 47_821;
 const BROWSERS: &[&str] = &["chromium", "chromium-browser", "google-chrome-stable", "google-chrome", "brave", "brave-browser", "microsoft-edge-stable"];
 
 fn usage() -> &'static str {
-    "OmaReader\n\n  omareader                open the reader\n  omareader serve [port]   run the server and print its address\n  omareader import FILE…   add files to the library\n"
+    "OmaReader\n\n  omareader                open the reader\n  omareader serve [port]   run the server and print its address\n  omareader import FILE…   add files to the library\n  omareader backup DIR     snapshot into a new directory (close the app first)\n  omareader restore BACKUP NEW_LIBRARY   restore without overwriting anything\n"
 }
 
 async fn start_server(listener: TcpListener, paths: Paths, db: Db) -> Result<(String, tokio::task::JoinHandle<()>)> {
@@ -118,14 +118,27 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "omareader=info".into()))
         .with_writer(std::io::stderr)
         .init();
-    let paths = Paths::resolve()?;
-    let db = Db::open(&paths.db)?;
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|s| s == "restore") {
+        if args.len() != 3 { bail!("{}", usage()); }
+        omareader::backup::restore(Path::new(&args[1]), Path::new(&args[2]))?;
+        println!("Restored to {}. Set OMAREADER_DATA_DIR to this directory to open it. Voice models can be downloaded again.", args[2]);
+        return Ok(());
+    }
+    let paths = Paths::resolve()?;
+    let _library_lock = omareader::backup::lock(&paths, args.first().is_some_and(|s| s == "backup"))?;
+    let db = Db::open(&paths.db)?;
     match args.first().map(String::as_str) {
         None => run_desktop(paths, db).await,
         Some("serve") => {
             let port = args.get(1).map(|p| p.parse()).transpose().context("the port must be a number")?.unwrap_or(DEFAULT_PORT);
             run_server(paths, db, port).await
+        }
+        Some("backup") => {
+            if args.len() != 2 { bail!("{}", usage()); }
+            omareader::backup::create(&paths, &db, Path::new(&args[1]))?;
+            println!("Backed up books, notes, conversations, positions and audio to {}. Voice models and browser/session data are excluded.", args[1]);
+            Ok(())
         }
         Some("import") => run_import(&paths, &db, &args[1..]),
         Some(_) => {

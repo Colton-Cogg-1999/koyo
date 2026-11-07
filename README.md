@@ -79,7 +79,19 @@ On other Linux distributions, install equivalent build tools and runtime package
 
 Imported books are copied, so the source files are left alone. The library lives in `$XDG_DATA_HOME/omareader`, or `~/.local/share/omareader` by default. Set `OMAREADER_DATA_DIR` for a different location.
 
-The directory contains the SQLite database, imported originals, extracted assets, Markdown notes, voice model, and generated audio. Close OmaReader before copying that directory for a complete backup. Unsaved notebook drafts are also kept in browser storage until a successful save, so a failed request does not discard your edits. Markdown mirrors are exports: editing one externally does not write changes back into the notebook database.
+The library screen shows the books folder and lets you open it or export a book's original file. The data directory contains the SQLite database, imported originals, extracted assets, Markdown notes, voice model, and generated audio.
+
+Close OmaReader, then make a checked backup into a **new** directory:
+
+```sh
+omareader backup ~/omareader-backup
+omareader restore ~/omareader-backup ~/Books/OmaReader
+OMAREADER_DATA_DIR=~/Books/OmaReader omareader
+```
+
+Backups include books, notes, conversations, reading positions, and generated audio, with checksums verified on restore. Voice models can be downloaded again; browser profiles and session credentials are excluded. Restore refuses to overwrite an existing directory. Notes saved in the database get fresh Markdown mirrors in the restored library. Close older versions too: the backup lock only coordinates versions that implement it.
+
+ Unsaved notebook drafts are also kept in browser storage until a successful save, so a failed request does not discard your edits. Markdown mirrors are exports: editing one externally does not write changes back into the notebook database.
 
 ```sh
 omareader                  # open the desktop reader, once installed
