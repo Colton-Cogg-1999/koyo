@@ -39,7 +39,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
   const [picked, setPicked] = useState<Picked | null>(null);
   const [editing, setEditing] = useState<{ annotation: Annotation; rect: DOMRect } | null>(null);
   const [typeOpen, setTypeOpen] = useState(false);
-  const [sideOpen, setSideOpen] = useState(true);
+  const [sideOpen, setSideOpen] = useState(() => window.innerWidth > 1040);
   const [tab, setTab] = useState<MarginTab>('margin');
   const [askSeed, setAskSeed] = useState<{ selection: string; block: number; endBlock: number; question?: string; nonce: number } | null>(null);
   const [notePositions, setNotePositions] = useState<NotePositions>(new Map());
@@ -234,6 +234,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
 
       {sideOpen && !focus && (
         <div className="side">
+          <button className="side-close ghost" onClick={() => setSideOpen(false)}>Back to reading</button>
           <Margin
             book={book}
             annotations={annotations ?? NO_ANNOTATIONS}

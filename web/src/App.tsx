@@ -14,6 +14,7 @@ export function App() {
   const [books, reloadBooks] = useAsync<Book[]>(() => api.books(), []);
   const [collections, reloadCollections] = useAsync<Collection[]>(() => api.collections(), []);
   const [dragging, setDragging] = useState(false);
+  const [audioOpen, setAudioOpen] = useState(false);
   const [focus, setFocus] = useState(false);
   const [search, setSearch] = useState<{ book?: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -71,7 +72,7 @@ export function App() {
 
   return (
     <div
-      className={`app ${focus ? 'zen' : ''}`}
+      className={`app ${focus ? 'zen' : ''} ${audioOpen ? 'audio-open' : ''}`}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
         depth.current++;
@@ -94,6 +95,7 @@ export function App() {
       {!focus && (
         <aside className="left">
           <NowPane route={route} latest={latest} onWorkspace={goWorkspace} />
+          <button className="mobile-audio ghost" aria-expanded={audioOpen} onClick={() => setAudioOpen(!audioOpen)}>{audioOpen ? 'Close audio' : 'Audio controls'}</button>
           <AudioPane />
         </aside>
       )}
