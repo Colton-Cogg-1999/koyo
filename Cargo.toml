@@ -1,0 +1,61 @@
+[package]
+name = "omareader"
+version = "0.1.0"
+edition = "2021"
+description = "A local-first e-reader with notes, AI questions through your own CLI subscription, and offline audiobooks."
+license = "MIT"
+
+[lib]
+name = "omareader"
+path = "src/lib.rs"
+
+[[bin]]
+name = "omareader"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-stream = "0.3"
+axum = "0.8"
+bzip2 = "0.6"
+ego-tree = "0.10"
+futures = "0.3"
+hex = "0.4"
+libc = "0.2"
+mime_guess = "2"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+quick-xml = "0.38"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+roxmltree = "0.21"
+rusqlite = { version = "0.37", features = ["bundled"] }
+rust-embed = "8"
+scraper = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+# 1.13 is the last line with the built-in espeak-ng fallback. 2.x silently skips every
+# word missing from the lexicon, numbers included, which would put holes in audiobooks.
+sherpa-onnx = "=1.13.8"
+tar = "0.4"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "6", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 1

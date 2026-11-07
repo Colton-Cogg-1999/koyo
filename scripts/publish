@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+visibility="${1:---private}"
+case "$visibility" in --public|--private) ;; *) echo 'Usage: publish [--private|--public]' >&2; exit 1;; esac
+account="$(gh api user --jq .login)"
+if [ "$account" != Colton-Cogg-1999 ]; then
+  echo "Expected GitHub account Colton-Cogg-1999; authenticated as $account. Run gh auth login --hostname github.com --web." >&2
+  exit 1
+fi
+if [ -n "$(git status --porcelain)" ]; then
+  echo 'Commit or stash changes before publishing.' >&2
+  exit 1
+fi
+if git remote get-url origin >/dev/null 2>&1; then
+  echo 'An origin remote already exists. Inspect it before pushing.' >&2
+  exit 1
+fi
+gh repo create Colton-Cogg-1999/omareader "$visibility" --source . --remote origin --push

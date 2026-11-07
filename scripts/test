@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT/web"
+npm run build
+cd "$ROOT"
+cargo test --locked
+cargo build --locked
+cd "$ROOT/web"
+npm test

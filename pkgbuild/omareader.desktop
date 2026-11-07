@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=OmaReader
+Comment=Read books, keep notes, and listen offline
+Exec=omareader
+Icon=omareader
+Terminal=false
+Categories=Office;Viewer;
+StartupWMClass=OmaReader

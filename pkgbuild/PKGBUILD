@@ -1,0 +1,23 @@
+pkgname=omareader
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Local-first reader with notes and offline narration'
+arch=('x86_64' 'aarch64')
+url='https://github.com/Colton-Cogg-1999/omareader'
+license=('MIT')
+depends=('gcc-libs' 'openssl' 'poppler' 'ffmpeg' 'xdg-utils')
+optdepends=('chromium: standalone app window' 'espeak-ng: speech phonemization')
+makedepends=('rust' 'nodejs' 'npm')
+source=()
+sha256sums=()
+build() {
+  cd "$startdir/.."
+  ./scripts/build
+}
+package() {
+  cd "$startdir/.."
+  install -Dm755 target/release/omareader "$pkgdir/usr/bin/omareader"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/omareader/LICENSE"
+  install -Dm644 pkgbuild/omareader.desktop "$pkgdir/usr/share/applications/omareader.desktop"
+  install -Dm644 web/public/mark.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/omareader.png"
+}

@@ -1,0 +1,17 @@
+/target
+/web/node_modules
+/web/dist
+/web/test-results
+*.log
+/prototype/
+/*.png
+/*.jpg
+/*.jpeg
+/.env
+/.env.*
+*.db
+*.db-shm
+*.db-wal
+/pkgbuild/pkg/
+/pkgbuild/src/
+*.pkg.tar.*
