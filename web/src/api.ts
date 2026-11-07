@@ -39,7 +39,7 @@ export const api = {
   block: (id: string, seq: number) => request<BlockLocation>(`/api/books/${id}/blocks/${seq}`),
   pageBlocks: (id: string, page: number) => request<BlockLocation[]>(`/api/books/${id}/pages/${page}/blocks`),
   savePosition: (id: string, block: number, fraction: number, page: number) =>
-    request<{ progress: number }>(`/api/books/${id}/position`, send('PUT', { block, fraction, page })),
+    request<{ progress: number }>(`/api/books/${id}/position`, { ...send('PUT', { block, fraction, page }), keepalive: true }),
   search: (q: string, book?: string) =>
     request<SearchHit[]>(`/api/search?q=${encodeURIComponent(q)}${book ? `&book=${book}` : ''}`),
   collections: () => request<Collection[]>('/api/collections'),
@@ -60,7 +60,11 @@ export const api = {
 
   notes: (book?: string) => request<Note[]>(`/api/notes${book ? `?book=${book}` : ''}`),
   createNote: (body: { book_id?: string | null; title?: string; body?: string }) => request<Note>('/api/notes', send('POST', body)),
-  updateNote: (id: string, patch: { title?: string; body?: string }) => request<Note>(`/api/notes/${id}`, send('PATCH', patch)),
+  updateNote: (id: string, patch: { title?: string; body?: string }) => request<Note>(`/api/notes/${id}`, {
+    ...send('PATCH', patch),
+    // Browsers cap keepalive payloads at 64 KiB; larger notebooks save normally.
+    keepalive: new TextEncoder().encode(JSON.stringify(patch)).byteLength < 60_000,
+  }),
   deleteNote: (id: string) => request(`/api/notes/${id}`, send('DELETE')),
 
   providers: (refresh = false) => request<Providers>(`/api/ai/providers${refresh ? '?refresh=1' : ''}`),

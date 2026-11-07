@@ -85,7 +85,9 @@ pub fn model_path(paths: &Paths) -> PathBuf {
 }
 
 pub fn installed(paths: &Paths) -> bool {
-    model_path(paths).join("model.onnx").exists()
+    let dir = model_path(paths);
+    ["model.onnx", "voices.bin", "tokens.txt", "lexicon-gb-en.txt", "lexicon-us-en.txt"]
+        .iter().all(|name| dir.join(name).is_file()) && dir.join("espeak-ng-data").is_dir()
 }
 
 pub type Events = broadcast::Sender<Value>;
@@ -162,6 +164,7 @@ pub struct Tts {
     active: Arc<Mutex<Option<String>>>,
     speed: Arc<AtomicU64>,
     pub exporting: Arc<AtomicBool>,
+    pub installing: Arc<AtomicBool>,
 }
 
 impl Tts {
@@ -173,6 +176,7 @@ impl Tts {
             active: Arc::new(Mutex::new(None)),
             speed: Arc::new(AtomicU64::new(0)),
             exporting: Arc::new(AtomicBool::new(false)),
+            installing: Arc::new(AtomicBool::new(false)),
         };
         let worker = tts.clone();
         std::thread::Builder::new()

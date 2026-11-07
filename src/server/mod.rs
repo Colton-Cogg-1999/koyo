@@ -138,9 +138,17 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
     if path.starts_with("/api/") && path != "/api/health" && !cookie_matches(request.headers(), &state.token) {
         return ApiError(StatusCode::UNAUTHORIZED, "Open OmaReader from the omareader command.".into()).into_response();
     }
+    // File-serving routes must never interpret a decoded identifier as a path.
+    if let Some(rest) = path.strip_prefix("/api/books/") {
+        let id = rest.split('/').next().unwrap_or("");
+        if id.len() != 24 || !id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return ApiError(StatusCode::BAD_REQUEST, "Invalid book identifier.".into()).into_response();
+        }
+    }
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
-    headers.insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static(CSP));
+    // Keep the stricter sandbox on untrusted book assets.
+    headers.entry(header::CONTENT_SECURITY_POLICY).or_insert(HeaderValue::from_static(CSP));
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(header::REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
     response

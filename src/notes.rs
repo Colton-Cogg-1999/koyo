@@ -23,7 +23,7 @@ fn slug(title: &str) -> String {
 }
 
 fn yaml(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    serde_json::to_string(value).expect("strings serialize as JSON")
 }
 
 fn quote_lines(text: &str) -> String {
@@ -113,6 +113,8 @@ pub fn mirror_loose_notes(db: &Db, paths: &Paths) -> Result<()> {
     }
     let dir = notes_dir(db, paths);
     fs::create_dir_all(&dir)?;
-    fs::write(dir.join("notebook.md"), md)?;
+    let temp = dir.join("notebook.md.tmp");
+    fs::write(&temp, md)?;
+    fs::rename(temp, dir.join("notebook.md"))?;
     Ok(())
 }

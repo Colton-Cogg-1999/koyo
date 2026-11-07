@@ -279,7 +279,11 @@ pub fn import_path(db: &Db, paths: &Paths, source: &Path) -> Result<String> {
     let file_name = source.file_name().and_then(|n| n.to_str()).context("file has no name")?.to_string();
     let temp = paths.tmp.join(uuid::Uuid::new_v4().to_string());
     fs::copy(source, &temp)?;
-    match register(db, paths, &temp, &file_name)? {
+    let registered = register(db, paths, &temp, &file_name);
+    if registered.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    match registered? {
         Registered::Existing(id) => Ok(id),
         Registered::New(id) => {
             process(db, paths, &id)?;
@@ -294,7 +298,9 @@ pub fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(value) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+            let hex = |b: u8| (b as char).to_digit(16);
+            if let (Some(high), Some(low)) = (hex(bytes[i + 1]), hex(bytes[i + 2])) {
+                let value = (high * 16 + low) as u8;
                 out.push(value);
                 i += 3;
                 continue;

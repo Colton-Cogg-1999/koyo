@@ -26,7 +26,6 @@ export function NowPane({ route, latest, onWorkspace }: { route: Route; latest?:
     <Pane className="now">
       <button className="brand" onClick={() => navigate('library')} title="Library">
         <Logo height={30} />
-        <span>READER</span>
       </button>
       <nav className="workspaces">
         {WORKSPACES.map((space) => (
@@ -196,7 +195,7 @@ export function AudioPane() {
     const busy = install && install.stage !== 'failed' && install.stage !== 'done';
     return (
       <Pane title={title} className="audio">
-        <p className="hint">offline neural narration. one-time 350 MB download. book text never leaves this machine.</p>
+        <p className="hint">local neural narration. one-time voice download of several hundred MB. narration runs on this machine.</p>
         {busy ? (
           <div className="meter"><i style={{ width: `${percent}%` }} /><span>{install.stage === 'unpack' ? 'unpacking…' : `${percent}% of ${bytes(install.total)}`}</span></div>
         ) : (

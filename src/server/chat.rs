@@ -17,8 +17,7 @@ use tokio::sync::mpsc;
 const HISTORY_TURNS: usize = 8;
 const STATUS_TTL: Duration = Duration::from_secs(300);
 
-async fn providers(State(state): State<AppState>, uri: Uri) -> ApiResult {
-    let refresh = parse_query(&uri).contains_key("refresh");
+async fn provider_list(state: &AppState, refresh: bool) -> Vec<ai::ProviderStatus> {
     let cached = state.provider_cache.lock().unwrap().clone();
     let list = match cached {
         Some((at, list)) if !refresh && at.elapsed() < STATUS_TTL => list,
@@ -28,6 +27,11 @@ async fn providers(State(state): State<AppState>, uri: Uri) -> ApiResult {
             list
         }
     };
+    list
+}
+
+async fn providers(State(state): State<AppState>, uri: Uri) -> ApiResult {
+    let list = provider_list(&state, parse_query(&uri).contains_key("refresh")).await;
     let selected = state.db.setting_str("ai_provider").or_else(|| list.iter().find(|p| p.signed_in).map(|p| p.id.to_string()));
     Ok(Json(json!({"providers": list, "selected": selected, "model": state.db.setting_str("ai_model").unwrap_or_default()})))
 }
@@ -91,7 +95,12 @@ async fn ask(State(state): State<AppState>, Path(chat): Path<String>, Json(body)
         turns.reverse();
         (book, turns)
     };
-    let provider = state.db.setting_str("ai_provider").unwrap_or_else(|| "claude".to_string());
+    let provider = match state.db.setting_str("ai_provider") {
+        Some(provider) if matches!(provider.as_str(), "claude" | "codex") => provider,
+        Some(_) => return Err(bad_request("Unknown AI provider. Choose Claude Code or Codex in settings.")),
+        None => provider_list(&state, false).await.iter().find(|p| p.signed_in)
+            .map(|p| p.id.to_string()).ok_or_else(|| bad_request("Sign in to Claude Code or Codex before asking a question."))?,
+    };
     let model = state.db.setting_str("ai_model");
     let prompt = retrieval::build(&state.db, &book, &body.request, &history)?;
     let citations = prompt.citations.clone();

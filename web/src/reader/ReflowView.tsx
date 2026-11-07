@@ -17,6 +17,7 @@ export type NotePositions = Map<string, { x: number; y: number }>;
 
 export interface Jump {
   block: number;
+  page?: number;
   fraction?: number;
   flash?: boolean;
   nonce: number;
@@ -153,7 +154,7 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     if (paper.current && section) paintAnnotations(paper.current, annotations);
   }, [annotations, section]);
 
-  useEffect(() => clearPaint, []);
+  useEffect(() => () => { clearPaint(); cancelAnimationFrame(frame.current); }, []);
 
   const inSection = (block: number) => !!section && block >= section.first_block && block <= section.last_block;
 

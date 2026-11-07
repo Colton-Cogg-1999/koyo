@@ -28,6 +28,9 @@ async fn install(State(state): State<AppState>) -> ApiResult {
     if tts::installed(&state.paths) {
         return Ok(Json(json!({"ok": true})));
     }
+    if state.tts.installing.swap(true, Ordering::SeqCst) {
+        return Err(ApiError(StatusCode::CONFLICT, "Voice installation is already running.".into()));
+    }
     let worker = state.clone();
     tokio::spawn(async move {
         if let Err(error) = tts::install(worker.paths.clone(), worker.events.clone()).await {
@@ -36,6 +39,7 @@ async fn install(State(state): State<AppState>) -> ApiResult {
         } else {
             worker.tts.wake();
         }
+        worker.tts.installing.store(false, Ordering::SeqCst);
     });
     Ok(Json(json!({"ok": true})))
 }

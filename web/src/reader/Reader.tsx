@@ -45,6 +45,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
   const [notePositions, setNotePositions] = useState<NotePositions>(new Map());
   const audio = usePlayer();
   const saveTimer = useRef(0);
+  const pendingPosition = useRef<Location | null>(null);
   const nonce = useRef(1);
   const mark = audio.book === id ? audio.mark : null;
 
@@ -60,17 +61,31 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
     if (!book) return;
     const saved = book.position;
     if (startBlock !== null) setJump({ block: startBlock, flash: true, nonce: ++nonce.current });
-    else if (saved) setJump({ block: saved.block, fraction: saved.fraction, nonce: ++nonce.current });
+    else if (saved) setJump({ block: saved.block, page: saved.page || undefined, fraction: saved.fraction, nonce: ++nonce.current });
     else setJump({ block: 0, fraction: 0, nonce: ++nonce.current });
     setLocation((l) => ({ ...l, ratio: saved?.progress ?? 0, page: saved?.page || 1 }));
     void player.load(book.id, book.title).catch(() => {});
   }, [book?.id, startBlock]);
 
+  const flushPosition = useCallback(() => {
+    window.clearTimeout(saveTimer.current);
+    const latest = pendingPosition.current;
+    if (!latest) return;
+    pendingPosition.current = null;
+    void api.savePosition(id, latest.block, latest.fraction, latest.page).catch(failure);
+  }, [id]);
+
+  useEffect(() => {
+    window.addEventListener('pagehide', flushPosition);
+    return () => { window.removeEventListener('pagehide', flushPosition); flushPosition(); };
+  }, [flushPosition]);
+
   const onLocation = useCallback((block: number, fraction: number, page: number, ratio: number) => {
     setLocation({ block, fraction, page, ratio });
+    pendingPosition.current = { block, fraction, page, ratio };
     window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => void api.savePosition(id, block, fraction, page).catch(() => {}), 700);
-  }, [id]);
+    saveTimer.current = window.setTimeout(flushPosition, 700);
+  }, [flushPosition]);
 
   const onNotes = useCallback((next: NotePositions) => {
     setNotePositions((current) => (samePositions(current, next) ? current : next));
@@ -89,7 +104,7 @@ export function Reader({ id, startBlock, focus, setFocus }: { id: string; startB
   const seek = useCallback((ratio: number) => {
     if (!book) return;
     const last = book.sections.at(-1)?.last_block ?? 0;
-    if (book.format === 'pdf') void api.pageBlocks(id, Math.max(1, Math.round(ratio * book.pages))).then((list) => list[0] && go(list[0].seq, false));
+    if (book.format === 'pdf') setJump({ block: -1, page: Math.max(1, Math.round(ratio * book.pages)), fraction: 0, nonce: ++nonce.current });
     else go(Math.round(ratio * last), false);
   }, [book, go, id]);
 

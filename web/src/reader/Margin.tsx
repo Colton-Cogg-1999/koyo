@@ -142,31 +142,82 @@ function NotesList({ book, annotations, reload, go }: { book: BookDetail; annota
 }
 
 export function NoteSheet({ note, onBack }: { note: Note; onBack: () => void }) {
-  const [title, setTitle] = useState(note.title);
-  const [body, setBody] = useState(note.body);
+  const draftKey = `omareader-note-draft:${note.id}`;
+  const [initial] = useState(() => {
+    try {
+      const draft = JSON.parse(localStorage.getItem(draftKey) ?? 'null');
+      if (typeof draft?.title === 'string' && typeof draft?.body === 'string') return { ...draft, recovered: true };
+    } catch { /* A disabled browser store must not prevent editing. */ }
+    return { title: note.title, body: note.body, recovered: false };
+  });
+  const [title, setTitle] = useState<string>(initial.title);
+  const [body, setBody] = useState<string>(initial.body);
+  const [status, setStatus] = useState(initial.recovered ? 'recovered unsaved draft' : 'saved');
   const timer = useRef(0);
-  const latest = useRef({ title, body });
-  latest.current = { title, body };
-  const schedule = () => {
+  const latest = useRef({ title: initial.title as string, body: initial.body as string });
+  const dirty = useRef(!!initial.recovered);
+  const deleted = useRef(false);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const save = () => {
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => void api.updateNote(note.id, latest.current).catch(failure), 500);
+    if (!dirty.current || deleted.current) return queue.current;
+    const snapshot = latest.current;
+    setStatus('saving…');
+    const pending = queue.current.catch(() => {}).then(() => api.updateNote(note.id, snapshot));
+    queue.current = pending;
+    return pending.then(() => {
+      if (latest.current === snapshot) {
+        dirty.current = false; setStatus('saved');
+        try { localStorage.removeItem(draftKey); } catch { /* The server copy is saved. */ }
+      }
+    }).catch((error) => { setStatus('save failed — your edits are still here'); throw error; });
   };
-  const back = async () => {
+  const change = (next: { title: string; body: string }) => {
+    latest.current = next;
+    dirty.current = true;
+    try { localStorage.setItem(draftKey, JSON.stringify(next)); } catch {
+      failure(new Error('Browser draft storage is unavailable. Keep this note open until it is saved.'));
+    }
+    setTitle(next.title); setBody(next.body); setStatus('unsaved');
     window.clearTimeout(timer.current);
-    await api.updateNote(note.id, latest.current).catch(failure);
-    onBack();
+    timer.current = window.setTimeout(() => void save().catch(failure), 500);
+  };
+  useEffect(() => {
+    const flush = () => { if (dirty.current && !deleted.current) void save().catch(failure); };
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty.current && !deleted.current) { flush(); event.preventDefault(); event.returnValue = ''; }
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', warn);
+    return () => {
+      window.clearTimeout(timer.current);
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', warn);
+      flush();
+    };
+  }, [note.id]);
+  const back = async () => {
+    try { await save(); onBack(); } catch (error) { failure(error); }
   };
   return (
     <div className="note-sheet">
       <div className="notes-actions">
-        <button className="ghost" onClick={() => void back()}>:wq</button>
+        <button className="ghost" onClick={() => void back()}>save & back</button>
+        <span className="hint" role="status">{status}</span>
         <button className="icon" title="Delete note" onClick={() => {
+          if (!window.confirm('Delete this note?')) return;
           window.clearTimeout(timer.current);
-          void api.deleteNote(note.id).then(onBack).catch(failure);
+          deleted.current = true;
+          void queue.current.catch(() => {}).then(() => api.deleteNote(note.id)).then(() => {
+            try { localStorage.removeItem(draftKey); } catch { /* The note was deleted. */ }
+            onBack();
+          }).catch((error) => {
+            deleted.current = false; failure(error);
+          });
         }}><Trash2 size={14} /></button>
       </div>
-      <input value={title} placeholder="title" onChange={(event) => { setTitle(event.target.value); schedule(); }} />
-      <textarea value={body} placeholder="markdown works" onChange={(event) => { setBody(event.target.value); schedule(); }} />
+      <input aria-label="Note title" value={title} placeholder="title" onChange={(event) => change({ ...latest.current, title: event.target.value })} />
+      <textarea aria-label="Note body" value={body} placeholder="markdown works" onChange={(event) => change({ ...latest.current, body: event.target.value })} />
     </div>
   );
 }

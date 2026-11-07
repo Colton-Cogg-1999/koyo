@@ -3,7 +3,7 @@ import { urls } from './api';
 import type { Book } from './types';
 
 export function Logo({ height = 26 }: { height?: number }) {
-  return <span className="logo" role="img" aria-label="Omarchy" style={{ height, width: height * 4.263 }} />;
+  return <span className="logo" role="img" aria-label="OmaReader" style={{ height, width: height * 4 }} />;
 }
 
 export function Pane({ title, tools, className = '', children }: { title?: ReactNode; tools?: ReactNode; className?: string; children: ReactNode }) {

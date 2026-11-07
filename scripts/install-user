@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+if [ ! -x "$ROOT/target/release/omareader" ]; then
+  echo 'Build the release first with ./scripts/build.' >&2
+  exit 1
+fi
+prefix="${OMAREADER_INSTALL_PREFIX:-$HOME/.local}"
+install -Dm755 "$ROOT/target/release/omareader" "$prefix/bin/omareader"
+install -Dm644 "$ROOT/pkgbuild/omareader.desktop" "$prefix/share/applications/omareader.desktop"
+install -Dm644 "$ROOT/web/public/mark.png" "$prefix/share/icons/hicolor/256x256/apps/omareader.png"
+install -Dm644 "$ROOT/LICENSE" "$prefix/share/licenses/omareader/LICENSE"
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database "$prefix/share/applications"
+fi
+printf 'Installed OmaReader under %s. Ensure %s/bin is in your desktop PATH.\n' "$prefix" "$prefix"

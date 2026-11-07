@@ -119,3 +119,35 @@ fn markdown_notes_mirror_and_retrieval_finds_passages() {
     let text = std::fs::read_to_string(mirrored).unwrap();
     assert!(text.contains("title: \"Field Guide\"") && text.contains("> The lamp burned low") && text.contains("A good line"), "{text}");
 }
+
+#[test]
+fn malformed_percent_sequences_preserve_unicode_without_panicking() {
+    for (raw, decoded) in [("%é", "%é"), ("%a界", "%a界"), ("100%", "100%"), ("%E2%98%83", "☃"), ("hello%20world", "hello world")] {
+        assert_eq!(ingest::percent_decode(raw), decoded);
+    }
+}
+
+#[test]
+fn rejected_cli_import_does_not_leave_a_temporary_copy() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("unsupported.bin");
+    std::fs::write(&file, "not a book").unwrap();
+    assert!(ingest::import_path(&db, &paths, &file).is_err());
+    assert_eq!(std::fs::read_dir(&paths.tmp).unwrap().count(), 0);
+    assert!(file.exists());
+}
+
+#[test]
+fn loose_notes_are_mirrored_and_multiline_metadata_is_escaped() {
+    let (dir, paths, db) = library();
+    let file = dir.path().join("note.txt");
+    std::fs::write(&file, "A paragraph to annotate.").unwrap();
+    let book = ingest::import_path(&db, &paths, &file).unwrap();
+    db.conn().execute("UPDATE books SET title=?2 WHERE id=?1", rusqlite::params![book, "First line\nsecond line"]).unwrap();
+    let (_, md) = notes::book_markdown(&db, &book).unwrap();
+    assert!(md.contains("title: \"First line\\nsecond line\""));
+    db.conn().execute("INSERT INTO notes(id,title,body,created_at,updated_at) VALUES('loose','Notebook','Keep this.',1,1)", []).unwrap();
+    notes::mirror_loose_notes(&db, &paths).unwrap();
+    assert!(std::fs::read_to_string(paths.notes.join("notebook.md")).unwrap().contains("Keep this."));
+    assert!(!paths.notes.join("notebook.md.tmp").exists());
+}

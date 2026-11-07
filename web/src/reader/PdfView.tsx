@@ -102,7 +102,7 @@ function mergeRects(rects: Rect[]) {
 
 export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPick, onHit, onNotes }: ViewProps) {
   const [doc, setDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
-  const [ratio, setRatio] = useState(1.414);
+  const [ratios, setRatios] = useState<number[]>([]);
   const [width, setWidth] = useState(0);
   const [visible, setVisible] = useState<Set<number>>(new Set([1]));
   const [overlays, setOverlays] = useState<Overlay[]>([]);
@@ -125,9 +125,13 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     });
     task.promise
       .then(async (loaded) => {
-        const first = await loaded.getPage(1);
-        const view = first.getViewport({ scale: 1 });
-        setRatio(view.height / view.width);
+        const dimensions: number[] = [];
+        for (let n = 1; n <= loaded.numPages; n++) {
+          const page = await loaded.getPage(n);
+          const view = page.getViewport({ scale: 1 });
+          dimensions.push(view.height / view.width);
+        }
+        setRatios(dimensions);
         setDoc(loaded);
       })
       .catch(failure);
@@ -157,10 +161,12 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     const box = scroller.current;
     const holder = pagesBox.current;
     if (!box || !holder || !holder.children.length) return;
-    const height = (holder.children[0] as HTMLElement).offsetHeight + 24;
-    const position = box.scrollTop / height;
-    const page = Math.min(pageCount, Math.floor(position) + 1);
-    const fraction = position - Math.floor(position);
+    const pages = Array.from(holder.children) as HTMLElement[];
+    const readingLine = box.getBoundingClientRect().top + 24;
+    const current = pages.find((p) => p.getBoundingClientRect().bottom > readingLine) ?? pages.at(-1)!;
+    const bounds = current.getBoundingClientRect();
+    const page = Number(current.dataset.page);
+    const fraction = Math.max(0, Math.min(1, (readingLine - bounds.top) / bounds.height));
     const low = Math.max(1, page - 2);
     const high = Math.min(pageCount, page + 3);
     setVisible((current) => {
@@ -170,15 +176,12 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
       return next;
     });
     const positions: NotePositions = new Map();
-    const pageHeight = height - 24;
-    const bounds = holder.getBoundingClientRect();
-    const first = holder.children[0].getBoundingClientRect();
-    const origin = bounds.top + 24;
     for (const annotation of annotations) {
       const anchor = parseAnchor(annotation);
-      if (!annotation.note || anchor?.kind !== 'pdf') continue;
+      if (!annotation.note || anchor?.kind !== 'pdf' || !anchor.rects.length) continue;
       const [at, x, y, w] = anchor.rects[0] as Rect;
-      positions.set(annotation.id, { x: first.left + (x + w) * first.width, y: origin + (at - 1) * height + y * pageHeight });
+      const bounds = pages[at - 1]?.getBoundingClientRect();
+      if (bounds) positions.set(annotation.id, { x: bounds.left + (x + w) * bounds.width, y: bounds.top + y * bounds.height });
     }
     onNotes(positions);
     void blocksOn(page).then((list) => onLocation(list[0]?.seq ?? pageBlocks.current.get(page - 1)?.at(-1)?.seq ?? 0, fraction, page, (page - 1 + fraction) / Math.max(1, pageCount))).catch(() => {});
@@ -188,16 +191,23 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     const box = scroller.current;
     const holder = pagesBox.current;
     if (!box || !holder?.children.length) return;
-    const height = (holder.children[0] as HTMLElement).offsetHeight + 24;
-    box.scrollTop = (page - 1 + fraction) * height;
+    const element = holder.children[Math.max(0, Math.min(holder.children.length - 1, page - 1))] as HTMLElement;
+    const rect = element.getBoundingClientRect();
+    box.scrollTop += rect.top - box.getBoundingClientRect().top - 24 + fraction * rect.height;
   }, []);
 
-  useEffect(report, [annotations]);
+  useEffect(report, [annotations, width, doc]);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
   useEffect(() => {
     if (!doc || width <= 0 || applied.current === jump.nonce) return;
     applied.current = jump.nonce;
     (async () => {
+      if (jump.page || book.words === 0) {
+        scrollToPage(jump.page || 1, jump.fraction ?? 0);
+        report();
+        return;
+      }
       if (jump.block === -1) return;
       const target = await api.block(book.id, jump.block);
       located.current.set(jump.block, target);
@@ -225,11 +235,13 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
       setOverlays((list) => [...list.filter((o) => o.kind !== 'reading'), { page: cached.page, rect: [cached.x!, cached.y!, cached.w!, cached.h!], kind: 'reading' }]);
       const box = scroller.current;
       const holder = pagesBox.current;
-      if (box && holder?.children.length) {
-        const height = (holder.children[0] as HTMLElement).offsetHeight + 24;
-        const top = (cached.page - 1 + cached.y!) * height;
-        if (top < box.scrollTop || top > box.scrollTop + box.clientHeight - 80) {
-          box.scrollTo({ top: top - box.clientHeight * 0.25, behavior: 'smooth' });
+      const element = holder?.children[cached.page - 1];
+      if (box && element) {
+        const rect = element.getBoundingClientRect();
+        const view = box.getBoundingClientRect();
+        const top = rect.top + cached.y! * rect.height;
+        if (top < view.top || top > view.bottom - 80) {
+          box.scrollBy({ top: top - view.top - view.height * 0.25, behavior: 'smooth' });
         }
       }
     })().catch(() => {});
@@ -315,7 +327,7 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
             doc={doc}
             number={number}
             width={width}
-            ratio={ratio}
+            ratio={ratios[number - 1] ?? 1.414}
             live={visible.has(number)}
             annotations={annotations}
             overlays={overlays.filter((o) => o.page === number)}

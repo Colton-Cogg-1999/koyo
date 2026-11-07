@@ -180,7 +180,7 @@ export function Settings() {
 
         <section>
           <h2>AGENT</h2>
-          <p className="hint">oma runs the claude or codex program on this machine, on your existing subscription. omareader never touches your login. every tool is disabled, and only the passages a question needs are sent.</p>
+          <p className="hint">optional: ask questions through your installed Claude Code or Codex CLI. questions, retrieved book passages, and recent chat history go to that provider. requests run with tools disabled; provider credentials are managed by the CLI.</p>
           <div className="provider-cards">
             {providers?.providers.map((p) => (
               <div key={p.id} className={`provider ${providers.selected === p.id ? 'on' : ''}`}>
