@@ -104,22 +104,6 @@ export interface Annotation {
   book_author?: string;
 }
 
-export interface Note {
-  id: string;
-  book_id: string | null;
-  book_title: string | null;
-  title: string;
-  body: string;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface Collection {
-  id: number;
-  name: string;
-  count: number;
-}
-
 export interface Citation {
   n: number;
   block: number;
@@ -163,69 +147,6 @@ export interface Providers {
   model: string;
 }
 
-export interface Voice {
-  id: string;
-  name: string;
-  accent: string;
-  gender: string;
-}
-
-export interface TtsStatus {
-  installed: boolean;
-  voices: Voice[];
-  default_voice: string;
-  threads: number | null;
-  cores: number;
-  ffmpeg: boolean;
-}
-
-export interface Track {
-  seq: number;
-  chapter: number;
-  first_block: number;
-  last_block: number;
-  chars: number;
-  ready: number;
-  duration_ms: number;
-}
-
-export interface Audiobook {
-  status: 'none' | 'generating' | 'paused' | 'done' | 'failed';
-  voice?: string;
-  cursor?: number;
-  error?: string | null;
-  listen_seq?: number;
-  listen_ms?: number;
-  tracks?: Track[];
-  has_export?: boolean;
-  chars_per_second?: number;
-}
-
-/** `[block, startOffset, endOffset, startMs, endMs]` for each spoken sentence. */
-export type Mark = [number, number, number, number, number];
-
-export interface TrackDetail {
-  seq: number;
-  chapter: number;
-  ready: number;
-  duration_ms: number;
-  marks: Mark[];
-  peaks: number[];
-}
-
-export interface AudiobookRow {
-  book_id: string;
-  voice: string;
-  status: string;
-  error: string | null;
-  title: string;
-  author: string;
-  has_cover: number;
-  total: number;
-  ready: number;
-  duration_ms: number;
-}
-
 export interface SearchHit {
   book_id: string;
   block: number;
@@ -245,26 +166,35 @@ export interface BlockLocation {
   kind: string;
 }
 
-export interface Storage {
-  data_dir: string;
-  books_dir: string;
-  notes_dir: string;
-  books_bytes: number;
-  audio_bytes: number;
-  models_bytes: number;
-  db_bytes: number;
-  formats: string[];
-  calibre_formats: string[];
-  calibre_installed: boolean;
-}
-
 export interface ReaderPrefs {
-  font: 'mono' | 'newsreader' | 'literata' | 'sans';
+  font: 'serif' | 'mincho' | 'sans';
   size: number;
   leading: number;
   width: number;
-  paper: 'term' | 'ivory' | 'sepia';
   zoom: number;
 }
 
-export const defaultPrefs: ReaderPrefs = { font: 'literata', size: 20, leading: 1.65, width: 36, paper: 'term', zoom: 1 };
+export const defaultPrefs: ReaderPrefs = { font: 'serif', size: 21, leading: 1.62, width: 34, zoom: 1 };
+
+/** Older saved preferences used other font names and a paper colour; keep what still applies. */
+export function normalizePrefs(saved: unknown): ReaderPrefs {
+  const raw = saved && typeof saved === 'object' ? saved as Partial<ReaderPrefs> : {};
+  // Settings from the old interface (mono, Newsreader, paper colours) were tuned for a different
+  // design; start those readers on the new defaults and keep only their PDF zoom.
+  if (raw.font && !['serif', 'mincho', 'sans'].includes(raw.font)) return { ...defaultPrefs, zoom: Math.min(2.5, Math.max(0.6, Number(raw.zoom) || 1)) };
+  const value = { ...defaultPrefs, ...raw };
+  value.size = Math.min(32, Math.max(14, Number(value.size) || defaultPrefs.size));
+  value.width = Math.min(48, Math.max(26, Number(value.width) || defaultPrefs.width));
+  value.zoom = Math.min(2.5, Math.max(0.6, Number(value.zoom) || 1));
+  return { font: value.font, size: value.size, leading: value.leading || defaultPrefs.leading, width: value.width, zoom: value.zoom };
+}
+
+/** Where the reader is: the block at the reading line, and the blocks on screen. */
+export interface ReadingLocation {
+  block: number;
+  endBlock?: number;
+  visibleStart?: number;
+  fraction: number;
+  page: number;
+  ratio: number;
+}

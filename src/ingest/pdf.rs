@@ -417,7 +417,7 @@ pub fn parse(path: &Path, file_name: &str) -> Result<ParsedBook> {
     }
     let layout = Command::new("pdftotext").args(["-bbox-layout", "-enc", "UTF-8"]).arg(path).arg("-").output()?;
     if !layout.status.success() {
-        bail!("OmaReader could not read the text of this PDF.");
+        bail!("Kōyō could not read the text of this PDF.");
     }
     let mut pages = parse_layout(&String::from_utf8_lossy(&layout.stdout))?;
     strip_margins(&mut pages);

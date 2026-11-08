@@ -9,5 +9,5 @@ export function renderMarkdown(source: string, citations: boolean | number[] = f
   const html = marked.parse(source, { async: false });
   const clean = DOMPurify.sanitize(html, { FORBID_TAGS: ['img', 'style', 'form', 'input'], FORBID_ATTR: ['style'] });
   if (!citations) return clean;
-  return clean.replace(/\[(\d{1,3})\]/g, (marker, n) => Array.isArray(citations) && !citations.includes(Number(n)) ? marker : `<button type="button" class="cite" data-cite="${n}" aria-label="Source ${n}">[${n}]</button>`);
+  return clean.replace(/\[(\d{1,3})\]/g, (marker, n) => Array.isArray(citations) && !citations.includes(Number(n)) ? marker : `<button type="button" class="cite" data-cite="${n}" aria-label="Source ${n}">${n}</button>`);
 }

@@ -35,7 +35,7 @@ impl Client {
             .request(
                 "initialize",
                 json!({
-                    "clientInfo": {"name": "omareader", "title": "OmaReader", "version": env!("CARGO_PKG_VERSION")},
+                    "clientInfo": {"name": "omareader", "title": "Kōyō", "version": env!("CARGO_PKG_VERSION")},
                     "capabilities": {"experimentalApi": true},
                 }),
             )
@@ -126,7 +126,7 @@ pub async fn run(cwd: &Path, turn: Turn, tx: &mpsc::Sender<AiEvent>) -> Result<(
                 // something unexpected, possibly text in the book steering the model.
                 let kind = message["params"]["item"]["type"].as_str().unwrap_or("");
                 if !matches!(kind, "userMessage" | "agentMessage" | "reasoning" | "plan" | "contextCompaction" | "hookPrompt") {
-                    bail!("Stopped: Codex tried to use a tool ({kind}), which OmaReader doesn't allow.");
+                    bail!("Stopped: Codex tried to use a tool ({kind}), which Kōyō doesn't allow.");
                 }
             }
             Some("turn/completed") => {

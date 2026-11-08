@@ -1,3 +1,4 @@
+#[cfg(feature = "narration")]
 pub mod audio;
 pub mod chat;
 pub mod library;
@@ -6,7 +7,8 @@ pub mod notes;
 use crate::ai::ProviderStatus;
 use crate::config::Paths;
 use crate::db::Db;
-use crate::tts::{Events, Tts};
+#[cfg(feature = "narration")]
+use crate::tts::Tts;
 use axum::body::Body;
 use axum::extract::{Query, Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
@@ -34,11 +36,15 @@ pub struct Inner {
     pub token: String,
     pub port: u16,
     pub events: Events,
+    #[cfg(feature = "narration")]
     pub tts: Tts,
     pub provider_cache: Mutex<Option<(Instant, Vec<ProviderStatus>)>>,
 }
 
 pub type AppState = Arc<Inner>;
+
+/// Server-sent events shared by imports and, when built in, narration.
+pub type Events = broadcast::Sender<Value>;
 
 pub struct ApiError(pub StatusCode, pub String);
 
@@ -136,7 +142,7 @@ async fn guard(State(state): State<AppState>, request: Request, next: Next) -> R
     }
     let path = request.uri().path();
     if path.starts_with("/api/") && path != "/api/health" && !cookie_matches(request.headers(), &state.token) {
-        return ApiError(StatusCode::UNAUTHORIZED, "Open OmaReader from the omareader command.".into()).into_response();
+        return ApiError(StatusCode::UNAUTHORIZED, "Open Kōyō from the omareader command.".into()).into_response();
     }
     // File-serving routes must never interpret a decoded identifier as a path.
     if let Some(rest) = path.strip_prefix("/api/books/") {
@@ -183,7 +189,7 @@ async fn statics(uri: Uri) -> Response {
     let path = if path.is_empty() { "index.html" } else { path };
     let (file, name) = match Assets::get(path) {
         Some(file) => (file, path),
-        None if path.starts_with("assets/") => return StatusCode::NOT_FOUND.into_response(),
+        None if path.starts_with("assets/") || path.starts_with("api/") => return StatusCode::NOT_FOUND.into_response(),
         None => match Assets::get("index.html") {
             Some(file) => (file, "index.html"),
             None => return (StatusCode::NOT_FOUND, "The web UI hasn't been built. Run `npm run build` in web/.").into_response(),
@@ -195,14 +201,16 @@ async fn statics(uri: Uri) -> Response {
 }
 
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/auth", get(auth))
         .route("/api/health", get(health))
         .route("/api/events", get(events))
         .merge(library::routes())
         .merge(notes::routes())
-        .merge(chat::routes())
-        .merge(audio::routes())
+        .merge(chat::routes());
+    #[cfg(feature = "narration")]
+    let router = router.merge(audio::routes());
+    router
         .fallback(statics)
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)

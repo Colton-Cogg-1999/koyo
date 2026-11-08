@@ -1,12 +1,12 @@
 pkgname=omareader
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Local-first reader with notes and offline narration'
+pkgdesc='Kōyō: a quiet local-first reader with notes and questions answered by your own AI CLI'
 arch=('x86_64' 'aarch64')
-url='https://github.com/Colton-Cogg-1999/omareader'
+url='https://github.com/Colton-Cogg-1999/koyo'
 license=('MIT')
-depends=('gcc-libs' 'openssl' 'poppler' 'ffmpeg' 'xdg-utils')
-optdepends=('chromium: standalone app window' 'espeak-ng: speech phonemization')
+depends=('gcc-libs' 'openssl' 'poppler' 'xdg-utils')
+optdepends=('chromium: standalone app window')
 makedepends=('rust' 'nodejs' 'npm')
 source=()
 sha256sums=()

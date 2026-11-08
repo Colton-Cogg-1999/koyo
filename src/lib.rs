@@ -6,5 +6,5 @@ pub mod ingest;
 pub mod notes;
 pub mod retrieval;
 pub mod server;
-pub mod theme;
+#[cfg(feature = "narration")]
 pub mod tts;

@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import { api } from '../api';
 import type { Annotation, BookDetail, ReaderPrefs, TextAnchor } from '../types';
 import { failure } from '../ui';
-import { annotationAt, anchorFromSelection, clearPaint, paintAnnotations, paintReading, parseAnchor, rangeFor } from './anchors';
+import { annotationAt, anchorFromSelection, clearPaint, paintAnnotations, parseAnchor, rangeFor } from './anchors';
 
 export interface Picked {
   anchor: TextAnchor | { kind: 'pdf'; rects: [number, number, number, number, number][] };
@@ -12,9 +12,6 @@ export interface Picked {
   block: number;
   page: number;
 }
-
-/** Screen position of the end of each noted passage's first line. */
-export type NotePositions = Map<string, { x: number; y: number }>;
 
 export interface Jump {
   block: number;
@@ -29,13 +26,11 @@ export interface ViewProps {
   prefs: ReaderPrefs;
   annotations: Annotation[];
   jump: Jump;
-  mark: { block: number; start: number; end: number } | null;
   onLocation: (block: number, fraction: number, page: number, ratio: number, endBlock?: number, visibleStart?: number) => void;
   onPick: (picked: Picked | null) => void;
   onHit: (annotation: Annotation, rect: DOMRect) => void;
   onJump: (block: number) => void;
-  /** Reports where each noted passage sits on screen, for the connector lines. */
-  onNotes: (positions: NotePositions) => void;
+  night: boolean;
 }
 
 interface SectionData {
@@ -54,7 +49,7 @@ const Prose = memo(function Prose({ html }: { html: string }) {
   return <div className="prose" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
-export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, onPick, onHit, onJump, onNotes }: ViewProps) {
+export function ReflowView({ book, prefs, annotations, jump, onLocation, onPick, onHit, onJump }: ViewProps) {
   const [unresolved, setUnresolved] = useState(0);
   const [section, setSection] = useState<SectionData | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -102,22 +97,6 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     };
   }, [jump]);
 
-  const noted = useRef<Annotation[]>([]);
-  noted.current = annotations.filter((a) => a.note && a.kind === 'highlight');
-
-  const measureNotes = () => {
-    const root = paper.current;
-    if (!root) return;
-    const positions: NotePositions = new Map();
-    for (const note of noted.current) {
-      const anchor = parseAnchor(note);
-      const range = anchor?.kind === 'text' ? rangeFor(root, anchor, note.quote) : null;
-      const line = range?.getClientRects()[0];
-      if (line) positions.set(note.id, { x: line.right, y: line.top });
-    }
-    onNotes(positions);
-  };
-
   const report = useCallback(() => {
     frame.current = 0;
     const box = scroller.current;
@@ -143,7 +122,6 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     const bottom = box.getBoundingClientRect().bottom;
     const visible = list.filter((b) => { const r = b.getBoundingClientRect(); return r.bottom > box.getBoundingClientRect().top && r.top < bottom; });
     onLocation(seq, fraction, 0, seq / Math.max(1, last), Number(visible.at(-1)?.dataset.b ?? seq), Number(visible[0]?.dataset.b ?? seq));
-    measureNotes();
   }, [book.sections, onLocation]);
 
   useLayoutEffect(() => {
@@ -172,9 +150,6 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
 
   useEffect(() => () => { clearPaint(); cancelAnimationFrame(frame.current); }, []);
 
-  const inSection = (block: number) => !!section && block >= section.first_block && block <= section.last_block;
-
-  useLayoutEffect(measureNotes, [annotations, section, prefs]);
 
   useEffect(() => {
     const root = paper.current;
@@ -183,27 +158,6 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     observer.observe(root);
     return () => observer.disconnect();
   }, [report]);
-
-  useEffect(() => {
-    if (!mark) {
-      paintReading(paper.current, null);
-      return;
-    }
-    if (section && !inSection(mark.block)) {
-      onJump(mark.block);
-      return;
-    }
-    paintReading(paper.current, mark);
-    const element = paper.current?.querySelector<HTMLElement>(`[data-b="${mark.block}"]`);
-    const box = scroller.current;
-    if (element && box) {
-      const rect = element.getBoundingClientRect();
-      const view = box.getBoundingClientRect();
-      if (rect.top < view.top + 40 || rect.bottom > view.bottom - 60) {
-        box.scrollBy({ top: rect.top - view.top - view.height * 0.3, behavior: 'smooth' });
-      }
-    }
-  }, [mark, section]);
 
   const onMouseUp = () => {
     window.setTimeout(() => {
@@ -228,6 +182,8 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
   };
 
   const index = section ? book.sections.findIndex((s) => s.idx === section.idx) : -1;
+  const chapterAt = section ? book.chapters.findIndex((c) => c.start >= section.first_block && c.start <= section.last_block) : -1;
+  const ordinal = chapterAt >= 0 && !book.chapters[chapterAt].front ? book.chapters.slice(0, chapterAt + 1).filter((c) => !c.front).length : 0;
   const next = index >= 0 ? book.sections[index + 1] : undefined;
   const previous = index > 0 ? book.sections[index - 1] : undefined;
 
@@ -264,22 +220,22 @@ export function ReflowView({ book, prefs, annotations, jump, mark, onLocation, o
     <div
       className="stage"
       ref={scroller}
-      data-paper={prefs.paper}
       onScroll={() => {
         frame.current ||= requestAnimationFrame(report);
       }}
     >
-      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved passage(s) could not be located safely. Your notes are still in Marks; reselect the passage to attach a new highlight.</p>}
+      {unresolved > 0 && <p className="annotation-warning" role="status">{unresolved} saved {unresolved === 1 ? 'passage' : 'passages'} could not be placed safely in this chapter. The notes are kept in the Notes panel; reselect the text to attach a new highlight.</p>}
       <article className={`paper font-${prefs.font}`} style={style}>
         <div className="paper-body" ref={paper} onMouseUp={onMouseUp} onClick={onClick}>
+          {section && ordinal > 0 && <p className="chapter-eyebrow" aria-hidden="true">Chapter {ordinal}</p>}
           {section && <Prose html={section.html} />}
           {next ? (
             <button className="next-chapter" onClick={() => onJump(next.first_block)}>
-              <span>Next chapter</span>
-              <strong>{next.title || 'next section'}</strong>
+              <span>Next</span>
+              <strong>{next.title || 'Next section'}</strong>
             </button>
           ) : (
-            section && <div className="the-end">End of book</div>
+            section && <div className="the-end"><i className="sun" />The end</div>
           )}
         </div>
       </article>

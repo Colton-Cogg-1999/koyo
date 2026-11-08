@@ -11,7 +11,7 @@ pub fn lock(paths: &Paths, exclusive: bool) -> Result<fs::File> {
     let mode = if exclusive { libc::LOCK_EX } else { libc::LOCK_SH };
     // The descriptor owns the advisory lock for its entire lifetime.
     if unsafe { libc::flock(file.as_raw_fd(), mode | libc::LOCK_NB) } != 0 {
-        bail!("The library is in use. Close OmaReader and finish imports before backing it up.");
+        bail!("The library is in use. Close Kōyō and finish imports before backing it up.");
     }
     Ok(file)
 }
@@ -73,7 +73,7 @@ pub fn create(paths: &Paths, db: &Db, destination: &Path) -> Result<()> {
 }
 
 pub fn restore(source: &Path, destination: &Path) -> Result<()> {
-    let manifest: Manifest = serde_json::from_slice(&fs::read(source.join("backup.json")).context("Not an OmaReader backup")?)?;
+    let manifest: Manifest = serde_json::from_slice(&fs::read(source.join("backup.json")).context("Not an Kōyō backup")?)?;
     if manifest.version != 1 || !manifest.files.contains_key("omareader.db") { bail!("Unsupported or incomplete backup."); }
     // Check the entire inventory before creating a destination.
     for (name, digest) in &manifest.files {

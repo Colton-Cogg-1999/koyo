@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::oneshot;
 
 const MODEL_DIR: &str = "kokoro-multi-lang-v1_0";
 const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2";
@@ -90,7 +90,7 @@ pub fn installed(paths: &Paths) -> bool {
         .iter().all(|name| dir.join(name).is_file()) && dir.join("espeak-ng-data").is_dir()
 }
 
-pub type Events = broadcast::Sender<Value>;
+pub use crate::server::Events;
 
 /// Downloads and unpacks the voice model. Writes into a temp directory and renames at the
 /// end, so an interrupted install never looks installed.

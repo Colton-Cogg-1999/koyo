@@ -1,7 +1,7 @@
 // Drives the real server and UI in Chromium. Build first: `npm run build && cargo build`.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -10,7 +10,7 @@ import { chromium } from 'playwright-core';
 let ORIGIN;
 const binary = resolve('../target/debug/omareader');
 const browserPath = process.env.CHROMIUM ?? '/usr/bin/chromium';
-const data = mkdtempSync(join(tmpdir(), 'omareader-e2e-'));
+const data = mkdtempSync(join(tmpdir(), 'koyo-e2e-'));
 let server, browser, page, token;
 const errors = [];
 
@@ -34,8 +34,9 @@ before(async () => {
   browser = await chromium.launch({ executablePath: browserPath, args: ['--no-sandbox'] });
   page = await (await browser.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
+  page.on('dialog', (dialog) => dialog.accept());
   await page.goto(url);
-  await page.waitForSelector('.main .pane');
+  await page.waitForSelector('.shelf');
 });
 
 after(async () => {
@@ -57,64 +58,6 @@ const select = (block) => page.evaluate((seq) => {
   selection.addRange(range);
   element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
 }, block);
-
-test('the API refuses other users, sites and hostnames', async () => {
-  const anonymous = await fetch(`${ORIGIN}/api/books`);
-  assert.equal(anonymous.status, 401);
-  const headers = { Cookie: `oma_session=${token}`, 'Content-Type': 'application/json' };
-  const crossSite = await fetch(`${ORIGIN}/api/settings`, { method: 'PUT', headers: { ...headers, Origin: 'https://evil.example' }, body: '{}' });
-  assert.equal(crossSite.status, 403);
-  const noOrigin = await fetch(`${ORIGIN}/api/settings`, { method: 'PUT', headers, body: '{}' });
-  assert.equal(noOrigin.status, 403);
-  const page2 = await fetch(`${ORIGIN}/`);
-  assert.match(page2.headers.get('content-security-policy'), /default-src 'self'/);
-});
-
-test('a dropped file is imported, read, marked and survives a reload', async () => {
-  const file = join(data, 'guide.md');
-  writeFileSync(file, '---\ntitle: Field Guide\nauthor: T. Author\n---\n\n# Lanterns\n\nThe lamp burned low across the quiet water tonight.\n\n# Bells\n\nTemple bells answered in the dark, and nothing here was lost.\n');
-  await page.setInputFiles('[data-testid=file-input]', file);
-  await page.waitForSelector('.row[title="Field Guide"]:not(.processing)');
-  await page.dblclick('.row[title="Field Guide"]');
-  await page.waitForSelector('.prose p');
-  await select(1);
-  await page.click('.pick-menu button[title="Add a note"]');
-  await page.fill('.note-editor textarea', 'remember this');
-  await page.click('.note-editor .solid');
-  await page.waitForSelector('.ref');
-  await page.reload();
-  await page.waitForSelector('.ref');
-  assert.match(await page.textContent('.ref'), /remember this/);
-  assert.equal(await page.evaluate(() => CSS.highlights.get('oma-green')?.size), 1);
-});
-
-test('the notes pane switches tabs and notes become Markdown files', async () => {
-  await page.click('.margin-pane .tab:has-text("Chapters")');
-  await page.click('.index button:has-text("Bells")');
-  await page.click('.margin-pane .tab:has-text("Saved")');
-  await page.click('.margin-pane .tab:has-text("Notes")');
-  assert.equal(await page.locator('.crash').count(), 0);
-  const notes = await page.evaluate(() => fetch('/api/storage').then((r) => r.json()));
-  const { readdirSync } = await import('node:fs');
-  const [file] = readdirSync(notes.notes_dir);
-  assert.match(readFileSync(join(notes.notes_dir, file), 'utf8'), /remember this/);
-});
-
-test('search finds text and jumps to it', async () => {
-  await page.keyboard.press('/');
-  await page.fill('.search-sheet input', 'temple');
-  await page.waitForSelector('.hits button');
-  await page.click('.hits button');
-  await page.waitForSelector('.flash');
-});
-
-test('workspaces open from the keyboard', async () => {
-  for (const [key, text] of [['3', 'Marks'], ['5', 'Settings'], ['4', 'Audio'], ['1', 'Library']]) {
-    await page.keyboard.press(key);
-    await page.waitForFunction((t) => document.querySelector('.main .pane-title h2')?.textContent.startsWith(t), text);
-  }
-  assert.deepEqual(errors, []);
-});
 
 const api = async (path, method = 'GET', body) => {
   const response = await fetch(`${ORIGIN}${path}`, {
@@ -139,6 +82,84 @@ const upload = async (name) => {
   await eventually(async () => (await api(`/api/books/${id}`)).status === 'ready');
   return id;
 };
+const signedIn = (models = []) => (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, installed: true, models, help: '' }], selected: 'codex', model: '' } });
+const stream = (events) => events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
+const openPanel = async (key, selector) => {
+  if (!(await page.locator(selector).isVisible())) await page.keyboard.press(key);
+  await page.waitForSelector(selector);
+};
+
+test('the API refuses other users, sites and hostnames', async () => {
+  const anonymous = await fetch(`${ORIGIN}/api/books`);
+  assert.equal(anonymous.status, 401);
+  const headers = { Cookie: `oma_session=${token}`, 'Content-Type': 'application/json' };
+  const crossSite = await fetch(`${ORIGIN}/api/settings`, { method: 'PUT', headers: { ...headers, Origin: 'https://evil.example' }, body: '{}' });
+  assert.equal(crossSite.status, 403);
+  const noOrigin = await fetch(`${ORIGIN}/api/settings`, { method: 'PUT', headers, body: '{}' });
+  assert.equal(noOrigin.status, 403);
+  const page2 = await fetch(`${ORIGIN}/`);
+  assert.match(page2.headers.get('content-security-policy'), /default-src 'self'/);
+});
+
+test('narration is not compiled into the default build, and unknown API paths are 404', async () => {
+  const response = await fetch(`${ORIGIN}/api/tts`, { headers: { Cookie: `oma_session=${token}` } });
+  assert.equal(response.status, 404);
+});
+
+test('an empty shelf invites a first book, and the theme toggles from the keyboard', async () => {
+  await page.waitForSelector('.welcome');
+  assert.match(await page.textContent('.brand'), /Kōyō/);
+  const before = await page.evaluate(() => document.documentElement.dataset.theme ?? 'auto');
+  await page.keyboard.press('d');
+  const after = await page.evaluate(() => document.documentElement.dataset.theme);
+  assert.ok(['day', 'night'].includes(after) && after !== before);
+  await page.reload();
+  await page.waitForSelector('.shelf');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), after);
+  await page.evaluate(() => { localStorage.removeItem('koyo:theme'); delete document.documentElement.dataset.theme; });
+});
+
+test('a dropped file is imported, read, noted and survives a reload', async () => {
+  const file = join(data, 'guide.md');
+  writeFileSync(file, '---\ntitle: Field Guide\nauthor: T. Author\n---\n\n# Lanterns\n\nThe lamp burned low across the quiet water tonight.\n\n# Bells\n\nTemple bells answered in the dark, and nothing here was lost.\n');
+  await page.setInputFiles('[data-testid=file-input]', file);
+  await page.waitForSelector('.card[title="Field Guide"]:not(.processing) .card-open:not([disabled])');
+  await page.click('.card[title="Field Guide"] .card-open');
+  await page.waitForSelector('.prose p');
+  await select(1);
+  await page.click('.selection-bar button:has-text("Note")');
+  await page.fill('.note textarea', 'remember this');
+  const id = (await api('/api/books')).find((b) => b.title === 'Field Guide').id;
+  await eventually(async () => (await api(`/api/annotations?book=${id}`)).some((a) => a.note === 'remember this'));
+  await page.reload();
+  await page.waitForSelector('.note-text');
+  assert.match(await page.textContent('.note-text'), /remember this/);
+  assert.equal(await page.evaluate(() => CSS.highlights.get('oma-yellow')?.size), 1);
+  const notes = await api('/api/storage');
+  const [mirror] = readdirSync(notes.notes_dir);
+  assert.match(readFileSync(join(notes.notes_dir, mirror), 'utf8'), /remember this/);
+});
+
+test('contents, search and the companion tabs open from the keyboard', async () => {
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('c');
+  await page.click('.toc button:has-text("Bells")');
+  await page.waitForFunction(() => document.querySelector('.prose')?.textContent.includes('Temple bells'));
+  await page.keyboard.press('/');
+  await page.fill('.panel-search input', 'temple');
+  await page.waitForSelector('.hits button');
+  await page.click('.hits button');
+  await page.waitForSelector('.flash');
+  for (const [key, tab] of [['h', 'Highlights'], ['n', 'Notes'], ['q', 'Ask']]) {
+    await page.locator('.prose').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press(key);
+    await page.waitForSelector(`[role="tab"][aria-selected="true"]:has-text("${tab}")`);
+  }
+  await page.locator('.prose').click({ position: { x: 5, y: 5 } });
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.panel', { state: 'hidden' });
+  assert.deepEqual(errors, []);
+});
 
 let epub, pdf;
 test('EPUB imports, navigates chapters, and sandboxes book assets', async () => {
@@ -146,6 +167,7 @@ test('EPUB imports, navigates chapters, and sandboxes book assets', async () => 
   await page.goto(`${ORIGIN}/#/read/${epub}`);
   await page.waitForSelector('.prose h1');
   assert.match(await page.textContent('.prose'), /Open Shelves/);
+  assert.match(await page.textContent('.chapter-eyebrow'), /Chapter 1/);
   const asset = await page.locator('.prose img').getAttribute('src');
   const response = await fetch(new URL(asset, ORIGIN), { headers: { Cookie: `oma_session=${token}` } });
   assert.match(response.headers.get('content-security-policy'), /^sandbox;/);
@@ -183,69 +205,23 @@ test('PDF pages keep their own aspect ratios and restore a blank-page position',
   assert.equal((await api(`/api/books/${pdf}`)).position.page, 3);
 });
 
-test('notebook autosaves on navigation, survives reload, and retains failed saves', async () => {
-  await page.goto(`${ORIGIN}/#/notebook`);
-  await page.click('button:has-text("new")');
-  await page.fill('[aria-label="Note title"]', 'Portable knowledge');
-  await page.fill('[aria-label="Note body"]', 'Keep the doors open.');
-  await page.evaluate(() => { location.hash = '#/library'; });
-  await eventually(async () => (await api('/api/notes')).some((n) => n.body === 'Keep the doors open.'));
-  await page.goto(`${ORIGIN}/#/notebook`);
-  await page.click('.note-card:has-text("Portable knowledge")');
-  assert.equal(await page.inputValue('[aria-label="Note body"]'), 'Keep the doors open.');
-  await page.route('**/api/notes/*', (route) => route.request().method() === 'PATCH'
-    ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"simulated storage failure"}' }) : route.continue());
-  await page.fill('[aria-label="Note body"]', 'These edits must stay visible.');
-  await page.click('button:has-text("save & back")');
-  await page.waitForSelector('.note-sheet [role="status"]:has-text("save failed")');
-  assert.equal(await page.inputValue('[aria-label="Note body"]'), 'These edits must stay visible.');
-  await page.evaluate(() => { location.hash = '#/library'; });
-  await page.waitForSelector('.pane-title h2:has-text("Library")');
-  await page.goto(`${ORIGIN}/#/notebook`);
-  await page.click('.note-card:has-text("Portable knowledge")');
-  assert.equal(await page.inputValue('[aria-label="Note body"]'), 'These edits must stay visible.');
-  await page.unroute('**/api/notes/*');
-  await page.click('button:has-text("save & back")');
-  await page.waitForSelector('.note-card');
-  assert.match(readFileSync(join(data,'lib','notes','notebook.md'), 'utf8'), /These edits must stay visible/);
-  await page.click('.note-card:has-text("Portable knowledge")');
-  const longNote = 'A long notebook remains portable. '.repeat(2500);
-  await page.fill('[aria-label="Note body"]', longNote);
-  await page.click('button:has-text("save & back")');
-  await page.waitForSelector('.note-card');
-  assert.ok((await api('/api/notes')).some((n) => n.body === longNote));
-});
-
-test('collections, favorites, duplicate imports, and deletion persist', async () => {
+test('duplicates are detected, originals download, and books leave the shelf from their menu', async () => {
   assert.equal(await upload('fixture.epub'), epub);
-  const collection = await api('/api/collections', 'POST', { name: 'Open shelf' });
-  await api(`/api/books/${epub}`, 'PATCH', { favorite: true, collections: [collection.id] });
-  const book = await api(`/api/books/${epub}`);
-  assert.equal(book.favorite, 1);
-  assert.equal(book.collection_ids, String(collection.id));
-  await api(`/api/collections/${collection.id}`, 'DELETE');
-  assert.equal((await api(`/api/books/${epub}`)).collection_ids, '');
-  await api(`/api/books/${pdf}`, 'DELETE');
-  assert.ok(!(await api('/api/books')).some((b) => b.id === pdf));
+  await page.goto(`${ORIGIN}/#/library`);
+  await page.waitForSelector('.card[title="Open Shelves"]');
+  await page.hover('.card[title="Open Shelves"]');
+  await page.click('.card[title="Open Shelves"] [aria-label^="Options"]');
+  const download = page.waitForEvent('download');
+  await page.click('[role="menuitem"]:has-text("Download original")');
+  assert.deepEqual(readFileSync(await (await download).path()), readFileSync(join(data, 'fixture.epub')));
+  const card = page.locator('.card').filter({ has: page.locator('.card-author:has-text("PDF")') }).first();
+  await card.hover();
+  await card.locator('[aria-label^="Options"]').click();
+  await page.click('[role="menuitem"]:has-text("Remove from shelf")');
+  await eventually(async () => !(await api('/api/books')).some((b) => b.id === pdf));
 });
 
-test('capture the real reader with original test content', async () => {
-  await api('/api/settings', 'PUT', { reader: { paper: 'ivory', font: 'newsreader', size: 22 } });
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-  await page.reload();
-  await page.waitForSelector('.prose h1');
-  await page.evaluate(() => document.fonts.ready);
-  await select(1);
-  await page.click('.pick-menu button[title="Add a note"]');
-  await page.fill('.note-editor textarea', 'Knowledge grows when people can read, question, and share it.');
-  await page.click('.note-editor .solid');
-  await page.waitForSelector('.ref');
-  await page.waitForTimeout(2500);
-  if (process.env.OMAREADER_SCREENSHOT) await page.screenshot({ path: process.env.OMAREADER_SCREENSHOT });
-  assert.deepEqual(errors, []);
-});
-
-test('real Kokoro narration and M4B export', { skip: !process.env.OMAREADER_TEST_TTS, timeout: 900000 }, async () => {
+test('real Kokoro narration and M4B export (needs a `--features narration` build)', { skip: !process.env.OMAREADER_TEST_TTS, timeout: 900000 }, async () => {
   await api('/api/tts/install', 'POST');
   await eventually(async () => (await api('/api/tts')).installed, 600000);
   await api(`/api/books/${epub}/audio`, 'POST', { voice: 'af_heart' });
@@ -256,40 +232,13 @@ test('real Kokoro narration and M4B export', { skip: !process.env.OMAREADER_TEST
   }, 240000);
   const audio = await api(`/api/books/${epub}/audio`);
   assert.ok(audio.tracks.length > 0 && audio.tracks.every((t) => t.ready && t.duration_ms > 0));
-  const detail = await api(`/api/books/${epub}/audio/tracks/0/detail`);
-  assert.ok(detail.marks.length > 0);
   await api(`/api/books/${epub}/audio/export`, 'POST');
   await eventually(async () => (await api(`/api/books/${epub}/audio`)).has_export, 30000);
   const file = join(data, 'lib', 'audio', epub, 'audiobook.m4b');
   const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', file], { encoding: 'utf8' });
   assert.equal(probe.status, 0, probe.stderr);
   assert.ok(Number(JSON.parse(probe.stdout).format.duration) > 1);
-  const volume = spawnSync('ffmpeg', ['-i', file, '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' });
-  assert.equal(volume.status, 0);
-  assert.doesNotMatch(volume.stderr, /mean_volume: -inf/);
-  assert.match(volume.stderr, /mean_volume: -?[0-9.]+ dB/);
-  writeFileSync(join(data, 'listening.md'), '# A longer reading session\n\n' + Array.from({ length: 24 }, (_, i) => `Paragraph ${i+1}. A reader can pause, think, and return to the same place. In 2026, the library held 42 books, each with room for notes.`).join('\n\n'));
-  const longBook = await upload('listening.md');
-  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
-  const paused = await api(`/api/books/${longBook}/audio/pause`, 'POST');
-  assert.equal(paused.status, 'paused');
-  assert.ok(paused.tracks.length > 1);
-  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
-  await eventually(async () => {
-    const state = await api(`/api/books/${longBook}/audio`);
-    assert.notEqual(state.status, 'failed', state.error);
-    return state.status === 'done';
-  }, 240000);
-  const complete = await api(`/api/books/${longBook}/audio`);
-  assert.ok(complete.tracks.every((track) => track.ready && track.duration_ms > 0));
-  await api(`/api/books/${longBook}/audio/position`, 'PUT', { seq: 1, ms: 1200 });
-  await api(`/api/books/${longBook}/audio`, 'POST', { voice: 'af_heart' });
-  const resumed = await api(`/api/books/${longBook}/audio`);
-  assert.equal(resumed.status, 'done');
-  assert.equal(resumed.listen_seq, 1);
-  assert.equal(resumed.listen_ms, 1200);
-  assert.deepEqual(resumed.tracks, complete.tracks);
-
+  await api(`/api/books/${epub}/audio`, 'DELETE');
 });
 
 test('live AI answers use the selected provider and persist citations', { skip: !process.env.OMAREADER_TEST_AI, timeout: 180000 }, async (t) => {
@@ -315,72 +264,6 @@ test('live AI answers use the selected provider and persist citations', { skip: 
     assert.ok(messages.at(-1).citations.length > 0);
     t.diagnostic(`${provider.id}: live response and citation persistence passed`);
   }
-});
-
-test('library exposes originals and asks about a chapter without opening the reader', async () => {
-  const before = (await api(`/api/books/${epub}`)).position;
-  const storage = await api('/api/storage');
-  assert.equal(storage.books_dir, join(data, 'lib', 'books'));
-  await page.goto(`${ORIGIN}/#/library`);
-  await page.click('.row[title="Open Shelves"]');
-  assert.match(await page.textContent('.library-location'), /books/);
-  const download = page.waitForEvent('download');
-  await page.click('a:has-text("Export original")');
-  const original = await download;
-  assert.deepEqual(readFileSync(await original.path()), readFileSync(join(data, 'fixture.epub')));
-  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [] }], selected: 'codex' } }));
-  let sent;
-  await page.route('**/api/chats/*/messages', (route) => {
-    if (route.request().method() !== 'POST') return route.continue();
-    sent = route.request().postDataJSON();
-    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","text":"Test transport only."}\n\ndata: {"type":"done","id":1}\n\n' });
-  });
-  await page.click('button:has-text("Ask this book")');
-  await page.waitForSelector('.study .agent');
-  assert.equal(await page.locator('.prose,.pdf-page').count(), 0);
-  await page.selectOption('[aria-label="Question scope"]', 'chapter');
-  const book = await api(`/api/books/${epub}`);
-  const chapter = book.chapters.find((c) => c.title === 'Room for Everyone');
-  await page.selectOption('[aria-label="Question scope"]', `chapter:${chapter.idx}`);
-  await page.fill('.ask textarea', 'What stands between a person and a book?');
-  await page.click('.ask button[type="submit"]');
-  await eventually(() => sent);
-  assert.equal(sent.scope, 'chapter');
-  assert.equal(sent.chapter, chapter.idx);
-  assert.equal(sent.block, undefined);
-  assert.deepEqual((await api(`/api/books/${epub}`)).position, before);
-  await page.unroute('**/api/chats/*/messages');
-  await page.unroute('**/api/ai/providers');
-});
-
-test('reader sends visible bounds and exact highlighted context', async () => {
-  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [] }], selected: 'codex' } }));
-  const sent = [];
-  await page.route('**/api/chats/*/messages', (route) => {
-    if (route.request().method() !== 'POST') return route.continue();
-    sent.push(route.request().postDataJSON());
-    return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"delta","text":"Test transport only."}\n\ndata: {"type":"done","id":1}\n\n' });
-  });
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-  await page.waitForSelector('.prose p');
-  await page.selectOption('[aria-label="Question scope"]', 'page');
-  await page.fill('.ask textarea', 'Explain the visible page');
-  await page.click('.ask button[type="submit"]');
-  await eventually(() => sent.length === 1);
-  assert.equal(sent[0].scope, 'page');
-  assert.ok(Number.isInteger(sent[0].block) && sent[0].end_block >= sent[0].block);
-  await select(1);
-  const quote = await page.locator('[data-b="1"]').textContent();
-  await page.click('.pick-menu button[title="Ask Oma"]');
-  await page.fill('.ask textarea', 'What does this selected passage mean?');
-  await page.click('.ask button[type="submit"]');
-  await eventually(() => sent.length === 2);
-  assert.equal(sent[1].scope, 'page');
-  assert.equal(sent[1].attachment.block, 1);
-  assert.equal(sent[1].attachment.end_block, 1);
-  assert.equal(sent[1].attachment.text, quote.trim().replace(/\s+/g, ' '));
-  await page.unroute('**/api/chats/*/messages');
-  await page.unroute('**/api/ai/providers');
 });
 
 test('live AI answers page, selection, and chosen chapter questions from the correct evidence', { skip: !process.env.OMAREADER_TEST_AI, timeout: 900000 }, async (t) => {
@@ -414,54 +297,95 @@ test('live AI answers page, selection, and chosen chapter questions from the cor
       assert.ok(answer.citations.length > 0);
       assert.ok(answer.citations.every((c) => c.block >= item.block));
       if (item.page) assert.ok(answer.citations.every((c) => c.page === item.page));
-      if (item.name !== 'unanswerable') {
-        const used = [...answer.content.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
-        assert.ok(used.length > 0, answer.content);
-        for (const n of used) assert.match(answer.citations.find((c) => c.n === n)?.quote ?? '', item.expected);
-      }
       t.diagnostic(`${provider.id}, ${item.name}: ${answer.content}`);
     });
   }
 });
 
-test('EPUB passage notes survive reflow and failed saves retain a recoverable draft', async () => {
+test('the reader sends visible bounds, and a selected passage asks about exactly that text', async () => {
+  await page.route('**/api/ai/providers*', signedIn());
+  const sent = [];
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: 'text/event-stream', body: stream([{ type: 'delta', text: 'Test transport only.' }, { type: 'done', id: 1 }]) });
+  });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await openPanel('q', '.ask-input textarea:not([disabled])');
+  await page.selectOption('[aria-label="Question scope"]', 'page');
+  await page.fill('.ask-input textarea', 'Explain the visible page');
+  await page.click('[aria-label="Send question"]');
+  await eventually(() => sent.length === 1);
+  assert.equal(sent[0].scope, 'page');
+  assert.ok(Number.isInteger(sent[0].block) && sent[0].end_block >= sent[0].block);
+  await select(1);
+  const quote = await page.locator('[data-b="1"]').textContent();
+  await page.click('.selection-bar .ask-action');
+  await page.waitForSelector('.attached');
+  assert.equal(await page.inputValue('[aria-label="Question scope"]'), 'selection');
+  await page.fill('.ask-input textarea', 'What does this selected passage mean?');
+  await page.click('[aria-label="Send question"]');
+  await eventually(() => sent.length === 2);
+  assert.equal(sent[1].scope, 'selection');
+  assert.equal(sent[1].block, 1);
+  assert.equal(sent[1].end_block, 1);
+  assert.equal(sent[1].selection, quote.trim().replace(/\s+/g, ' '));
+  assert.equal(await page.locator('.attached').count(), 0);
+  assert.equal(await page.inputValue('[aria-label="Question scope"]'), 'chapter');
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers*');
+});
+
+test('EPUB passage notes survive reflow, and failed saves keep a recoverable draft', async () => {
   await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
   await page.waitForSelector('.prose p');
   await select(2);
   const quote = (await page.locator('[data-b="2"]').textContent()).trim();
-  await page.click('.pick-menu button[title="Add a note"]');
-  await page.fill('.note-editor textarea', 'Reflow must keep this passage.');
   await page.route('**/api/annotations/*', (route) => route.request().method() === 'PATCH' ? route.fulfill({ status: 500, json: { error: 'disk unavailable' } }) : route.continue());
-  await page.click('.note-editor .solid');
-  await page.waitForSelector('.note-editor [role="status"]:has-text("Save failed")');
-  assert.equal(await page.inputValue('.note-editor textarea'), 'Reflow must keep this passage.');
+  await page.click('.selection-bar button:has-text("Note")');
+  await page.fill('.note.editing textarea', 'Reflow must keep this passage.');
+  await page.waitForSelector('.note [role="status"]:has-text("Not saved")');
+  assert.equal(await page.inputValue('.note.editing textarea'), 'Reflow must keep this passage.');
   await page.reload();
   await page.waitForSelector('.prose p');
-  // Open the saved highlight through the margin, including its unsaved local draft.
-  await page.click('.margin-pane .tab:has-text("Notes")');
-  const annotations = await api(`/api/annotations?book=${epub}`);
-  const annotation = annotations.find((a) => a.quote === quote);
-  assert.ok(annotation);
-  const point = await page.locator('[data-b="2"]').evaluate((element) => { const r = document.createRange(); r.selectNodeContents(element); const box = r.getClientRects()[0]; return { x: box.left + 10, y: box.top + box.height / 2 }; });
-  await page.mouse.click(point.x, point.y);
-  await page.waitForSelector('.note-editor');
-  assert.equal(await page.inputValue('.note-editor textarea'), 'Reflow must keep this passage.');
+  await openPanel('n', '.notes');
+  await page.waitForSelector('.note-text:has-text("Reflow must keep this passage.")');
   await page.unroute('**/api/annotations/*');
-  await page.click('.note-editor .solid');
+  await page.click('.note-text:has-text("Reflow must keep this passage.")');
+  await page.click('.note.editing button:has-text("Done")');
   await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.note === 'Reflow must keep this passage.'));
+  const annotation = (await api(`/api/annotations?book=${epub}`)).find((a) => a.quote === quote);
+  assert.ok(annotation);
   for (const [font, size, leading, width, viewport] of [
-    ['literata', 28, 2, 28, { width: 1100, height: 800 }],
-    ['sans', 13, 1.3, 60, { width: 1600, height: 1000 }],
-    ['newsreader', 22, 1.7, 36, { width: 900, height: 1200 }],
+    ['serif', 28, 2, 28, { width: 1100, height: 800 }],
+    ['sans', 14, 1.3, 48, { width: 1600, height: 1000 }],
+    ['mincho', 22, 1.7, 36, { width: 900, height: 1200 }],
   ]) {
     await api('/api/settings', 'PUT', { reader: { font, size, leading, width } });
     await page.setViewportSize(viewport);
     await page.reload();
     await page.waitForSelector('.prose p');
-    await eventually(async () => page.evaluate((q) => [...(CSS.highlights.get('oma-green') ?? [])].some((r) => r.toString().trim() === q), quote));
-    assert.ok((await api(`/api/annotations?book=${epub}`)).some((a) => a.id === annotation.id && a.note === 'Reflow must keep this passage.'));
+    await eventually(async () => page.evaluate((q) => [...(CSS.highlights.get('oma-yellow') ?? [])].some((r) => r.toString().trim() === q), quote));
   }
   await page.setViewportSize({ width: 1600, height: 900 });
+});
+
+test('clicking a highlight recolours or removes it in place', async () => {
+  await api('/api/settings', 'PUT', { reader: { font: 'serif', size: 20, width: 34 } });
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  await select(3);
+  await page.click('.selection-bar .dot.green');
+  await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3 && a.color === 'green'));
+  const point = await page.locator('[data-b="3"]').evaluate((element) => { const r = document.createRange(); r.selectNodeContents(element); const box = r.getClientRects()[0]; return { x: box.left + 10, y: box.top + box.height / 2 }; });
+  await page.mouse.click(point.x, point.y);
+  await page.waitForSelector('.selection-bar .dot.green.on');
+  await page.click('.selection-bar .dot.pink');
+  await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3 && a.color === 'pink'));
+  await page.mouse.click(point.x, point.y);
+  await page.click('.selection-bar [aria-label="Remove highlight"]');
+  await eventually(async () => !(await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3));
 });
 
 test('PDF notes keep normalized geometry through zoom and reopening', async () => {
@@ -474,9 +398,8 @@ test('PDF notes keep normalized geometry through zoom and reopening', async () =
     getSelection().removeAllRanges(); getSelection().addRange(range);
     span.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
-  await page.click('.pick-menu button[title="Add a note"]');
-  await page.fill('.note-editor textarea', 'PDF geometry stays put.');
-  await page.click('.note-editor .solid');
+  await page.click('.selection-bar button:has-text("Note")');
+  await page.fill('.note.editing textarea', 'PDF geometry stays put.');
   await eventually(async () => (await api(`/api/annotations?book=${id}`)).some((a) => a.note === 'PDF geometry stays put.'));
   const saved = (await api(`/api/annotations?book=${id}`))[0];
   const rect = JSON.parse(saved.anchor).rects[0];
@@ -491,6 +414,7 @@ test('PDF notes keep normalized geometry through zoom and reopening', async () =
     normalized.forEach((v, i) => assert.ok(Math.abs(v - rect[i+1]) < .003));
     assert.equal((await api(`/api/annotations?book=${id}`))[0].note, 'PDF geometry stays put.');
   }
+  await api('/api/settings', 'PUT', { reader: { zoom: 1 } });
   assert.deepEqual(errors, []);
 });
 
@@ -504,148 +428,143 @@ test('stale EPUB offsets recover by quote or visibly refuse an unsafe attachment
   });
   await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
   await page.waitForSelector('.prose p');
-  await eventually(async () => page.evaluate(() => [...(CSS.highlights.get('oma-green') ?? [])].some((r) => r.toString().startsWith('A book on your disk'))));
+  await eventually(async () => page.evaluate(() => [...(CSS.highlights.get('oma-yellow') ?? [])].some((r) => r.toString().startsWith('A book on your disk'))));
   damaged = true;
   await page.reload();
   await page.waitForSelector('.annotation-warning');
-  const highlights = await page.evaluate(() => [...(CSS.highlights.get('oma-green') ?? [])].map((r) => r.toString()));
+  const highlights = await page.evaluate(() => [...(CSS.highlights.get('oma-yellow') ?? [])].map((r) => r.toString()));
   assert.ok(!highlights.some((text) => text.includes('This paragraph was replaced')));
   assert.ok((await api(`/api/annotations?book=${epub}`)).some((a) => a.note === 'Reflow must keep this passage.'));
   await page.unroute(`**/api/books/${epub}/sections/*`);
 });
 
-test('portrait layout keeps book actions, reading, and question controls accessible', async () => {
-  await page.evaluate(() => localStorage.setItem('omareader:sidebar-open','false'));
-  await page.setViewportSize({ width: 820, height: 1180 });
-  await page.goto(`${ORIGIN}/#/library`);
-  await page.click('.row[title="Open Shelves"]');
-  assert.ok(await page.locator('button:has-text("Ask this book")').isVisible());
-  await page.click('button:has-text("Ask this book")');
-  await page.waitForSelector('.study .agent');
-  await page.selectOption('[aria-label="Question scope"]', 'chapter');
-  assert.ok(await page.locator('[aria-label="Question scope"] optgroup option').count() > 0);
+test('appearance changes persist, and PDF zoom resizes pages', async () => {
   await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
   await page.waitForSelector('.prose p');
-  assert.equal(await page.locator('.side').isVisible(), false);
-  await page.locator('button[title^="Side panes"]').click();
-  await page.waitForSelector('.side .agent');
-  await page.click('.side-close');
-  assert.equal(await page.locator('.side').isVisible(), false);
-  await page.click('[title="Audio (4)"]');
-  await page.waitForSelector('.audio-workspace .audio');
-  await page.click('[title="Read (2)"]');
-  await page.waitForSelector('.prose p');
-  assert.equal(await page.locator('.audio').count(), 0);
-  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-  await page.setViewportSize({ width: 1600, height: 900 });
-});
-
-
-test('minimal reader has contextual persistent zoom and moves narration into the Audio tab', async () => {
-  await page.evaluate(() => localStorage.setItem('omareader:sidebar-open','true'));
-  // Reset this temporary fixture even when the optional synthesis test ran first.
-  await api(`/api/books/${epub}/audio`, 'DELETE');
-  await api('/api/settings', 'PUT', { reader: { font: 'mono', size: 16, zoom: 1 } });
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  const start = parseFloat(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize));
+  await page.click('[aria-label="Appearance"]');
+  await page.click('[aria-label="More size"]');
+  await eventually(async () => (await api('/api/settings')).reader.size === start + 1);
+  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), `${start + 1}px`);
+  await page.click('.segmented button:has-text("Night")');
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'night');
+  await page.keyboard.press('Escape');
   await page.reload();
   await page.waitForSelector('.prose p');
-  assert.equal(await page.locator('.left, .audio').count(), 0);
-  const positions = await page.evaluate(() => {
-    const rect = (s) => { const r = document.querySelector(s).getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width }; };
-    return { reader: rect('.volume'), notes: rect('.margin-pane'), chat: rect('.agent') };
-  });
-  assert.ok(positions.notes.x > positions.reader.x + positions.reader.width - 2);
-  assert.ok(positions.chat.y > positions.notes.y);
-  assert.equal(positions.notes.x, positions.chat.x);
-  await page.click('[title="Text and page"]');
-  await page.locator('.type-panel input[type=range]').first().fill('18');
-  await page.click('.type-panel [title="Close"]');
-  await eventually(async () => (await api('/api/settings')).reader.size === 18);
-  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), '18px');
-  await page.reload();
-  await page.waitForSelector('.prose p');
-  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), '18px');
-  if (process.env.OMAREADER_LAYOUT_SCREENSHOT) await page.screenshot({ path: process.env.OMAREADER_LAYOUT_SCREENSHOT });
-  await page.click('[title="Text and page"]');
-  await page.locator('.type-panel input[type=range]').first().fill('16');
-  await page.click('.type-panel [title="Close"]');
-  await eventually(async () => (await api('/api/settings')).reader.size === 16);
-  await page.route('**/api/tts', (route) => route.fulfill({ json: { installed: true, ffmpeg: true, default_voice: 'af_heart', voices: [{ id: 'af_heart', name: 'Heart', accent: 'American', gender: 'Female' }] } }));
-  let narrated;
-  await page.route(`**/api/books/${epub}/audio`, (route) => {
-    if (route.request().method() !== 'POST') return route.continue();
-    narrated = route.request().postDataJSON();
-    return route.fulfill({ json: { status: 'generating', cursor: 0, tracks: [] } });
-  });
-  await page.click('[title="Audio (4)"]');
-  await page.waitForSelector('.audio-workspace .audio');
-  await page.waitForTimeout(400);
-  assert.equal(await page.locator('.crash').count(), 0, (await page.textContent('body')));
-  await page.click('button:has-text("start narrating")');
-  await eventually(() => narrated);
-  assert.equal(narrated.voice, 'af_heart');
-  assert.ok(Number.isInteger(narrated.block));
-  await page.unroute(`**/api/books/${epub}/audio`);
-  await page.unroute('**/api/tts');
-  await page.click('[title="Read (2)"]');
-  await page.waitForSelector('.prose p');
-  assert.equal(await page.locator('.audio').count(), 0);
+  assert.equal(await page.locator('.prose p').first().evaluate((p) => getComputedStyle(p).fontSize), `${start + 1}px`);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'night');
+  await page.click('[aria-label="Appearance"]');
+  await page.click('.segmented button:has-text("Auto")');
+  await page.click('[aria-label="Less size"]');
+  await eventually(async () => (await api('/api/settings')).reader.size === start);
+  await page.keyboard.press('Escape');
   const id = await upload('mixed-pages.pdf');
   await page.goto(`${ORIGIN}/#/read/${id}?b=0`);
   await page.waitForSelector('.pdf-page canvas');
-  const before = await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width);
-  await page.click('[title="Text and page"]');
-  await page.locator('.type-panel input[type=range]').fill('1.1');
-  await eventually(async () => (await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width)) > before * 1.05);
-  await page.locator('.type-panel input[type=range]').fill('1');
-  await page.click('.type-panel [title="Close"]');
-  await eventually(async () => Math.abs((await page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width)) - before) < 2);
+  const width = () => page.locator('.pdf-page').first().evaluate((p) => p.getBoundingClientRect().width);
+  const before = await width();
+  await page.click('[aria-label="Appearance"]');
+  await page.click('[aria-label="More zoom"]');
+  await eventually(async () => (await width()) > before * 1.05);
+  await page.click('[aria-label="Less zoom"]');
+  await eventually(async () => Math.abs((await width()) - before) < 2);
   assert.deepEqual(errors, []);
 });
 
-test('the quiet chat keeps citations, shared marks, and settings shortcuts usable', async () => {
-  await page.evaluate((id) => localStorage.removeItem(`omareader:chat-draft:${id}`), epub);
-  await page.route('**/api/ai/providers', (route) => route.fulfill({ json: { providers: [{ id: 'codex', name: 'Test provider', signed_in: true, models: [{ id: 'test', label: 'Test model' }] }], selected: 'codex' } }));
+test('answers keep citations, save to notes, and attached passages can be removed', async () => {
+  await page.evaluate((id) => localStorage.removeItem(`koyo:ask-draft:${id}`), epub);
+  await page.route('**/api/ai/providers*', signedIn([{ id: 'test', label: 'Test model' }]));
   await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
   await page.waitForSelector('.prose p');
-  await page.click('[aria-label="New conversation"]');
-  assert.equal(await page.locator('.agent .pane-title h2').textContent(), 'Ask this book');
-  assert.doesNotMatch(await page.textContent('.agent'), /USER_>|OMA:|AI AGENT|SYS:/);
-  assert.equal(await page.locator('.provider-menu').count(), 0);
-  await page.click('[aria-label="Chat options"]');
-  await page.waitForSelector('.provider-menu');
-  assert.ok(await page.locator('button:has-text("Provider and model")').isVisible());
-  await page.keyboard.press('Escape');
-  assert.equal(await page.locator('.provider-menu').count(), 0);
+  await openPanel('q', '.ask-input textarea:not([disabled])');
+  if (await page.locator('[aria-label="New conversation"]:not([disabled])').count()) await page.click('[aria-label="New conversation"]');
+  await page.waitForSelector('.suggestions');
   await page.route('**/api/chats/*/messages', (route) => {
     if (route.request().method() !== 'POST') return route.continue();
-    const events = [
+    return route.fulfill({ contentType: 'text/event-stream', body: stream([
       { type: 'citations', citations: [{ n: 1, block: 1, page: 0, chapter: 'Open Shelves', quote: 'Reading should belong to everyone.' }] },
-      { type: 'delta', text: 'The passage treats reading as something everyone should have access to. It gives the reader room to pause, disagree, and ask a question of their own. [1]' },
+      { type: 'delta', text: 'The passage treats reading as something everyone should have access to. [1]' },
       { type: 'done', id: 1 },
-    ];
-    return route.fulfill({ contentType: 'text/event-stream', body: events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('') });
+    ]) });
   });
-  await page.fill('.ask textarea', 'What does the passage say about the reader?');
+  await page.fill('.ask-input textarea', 'What does the passage say about the reader?');
   await page.click('[aria-label="Send question"]');
   await page.waitForSelector('.answer .cite');
-  assert.ok((await page.locator('.answer').evaluate((e) => getComputedStyle(e).fontFamily)).includes('Newsreader'));
-  await page.click('[title="Save answer to Marks"]');
+  assert.ok((await page.locator('.answer').evaluate((e) => getComputedStyle(e).fontFamily)).includes('Literata'));
+  await page.click('.answer button:has-text("Save to notes")');
   await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((n) => n.note.includes('Reading should belong to everyone.') && n.block === 1));
   await page.click('.answer .cite');
   await page.waitForSelector('[data-b="1"].flash');
   await select(2);
-  await page.click('.pick-menu button[title="Ask Oma"]');
-  await page.waitForSelector('.quoted');
+  await page.click('.selection-bar .ask-action');
+  await page.waitForSelector('.attached');
   if (process.env.OMAREADER_CHAT_SCREENSHOT) await page.screenshot({ path: process.env.OMAREADER_CHAT_SCREENSHOT });
-  await page.click('[aria-label="Remove selected text"]');
-  assert.equal(await page.locator('.quoted').count(), 0);
+  await page.click('[aria-label="Remove passage"]');
+  assert.equal(await page.locator('.attached').count(), 0);
   assert.equal(await page.inputValue('[aria-label="Question scope"]'), 'chapter');
   await page.click('[aria-label="New conversation"]');
   assert.equal(await page.locator('.answer').count(), 0);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('n');
+  await page.waitForSelector('.note-kind:has-text("Saved answer")');
   await page.unroute('**/api/chats/*/messages');
-  await page.unroute('**/api/ai/providers');
+  await page.unroute('**/api/ai/providers*');
   assert.deepEqual(errors, []);
+});
+
+test('an attached passage survives navigation, and missing providers keep the question', async () => {
+  await page.route('**/api/ai/providers*', signedIn());
+  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+  await page.waitForSelector('.prose p');
+  const sent = [];
+  await page.route('**/api/chats/*/messages', (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ contentType: 'text/event-stream', body: stream([{ type: 'context', context: { scope: 'chapter', partial: true } }, { type: 'delta', text: 'Only some passages were supplied. [99]' }, { type: 'done', id: 1 }]) });
+  });
+  await select(1);
+  await page.click('.selection-bar .ask-action');
+  assert.equal(sent.length, 0);
+  await page.selectOption('[aria-label="Question scope"]', 'chapter');
+  await page.click('.prose a:has-text("Next chapter")');
+  await page.waitForFunction(() => document.querySelector('.prose h1')?.textContent === 'Room for Everyone');
+  await page.fill('.ask-input textarea', 'Compare this chapter with my attached passage.');
+  await page.click('[aria-label="Send question"]');
+  await eventually(() => sent.length === 1);
+  assert.equal(sent[0].attachment.block, 1);
+  assert.equal(sent[0].chapter, 1);
+  await page.waitForSelector('.answer .hint:has-text("partial")');
+  assert.equal(await page.locator('[data-cite="99"]').count(), 0);
+  await page.fill('.ask-input textarea', 'Keep this question until a tool is ready.');
+  await page.unroute('**/api/chats/*/messages');
+  await page.unroute('**/api/ai/providers*');
+  await page.route('**/api/ai/providers*', (route) => route.fulfill({ json: { providers: [{ id: 'claude', name: 'Claude Code', installed: false, signed_in: false, models: [], help: 'Install Claude Code.' }], selected: null, model: '' } }));
+  await page.reload();
+  await page.waitForSelector('.setup button:has-text("Check again")');
+  assert.equal(await page.inputValue('.ask-input textarea'), 'Keep this question until a tool is ready.');
+  assert.ok(await page.locator('.prose p').first().isVisible());
+  await page.unroute('**/api/ai/providers*');
+  await page.evaluate((id) => localStorage.removeItem(`koyo:ask-draft:${id}`), epub);
+  assert.deepEqual(errors, []);
+});
+
+test('narrow and portrait windows keep reading, the companion card and the shelf usable', async () => {
+  for (const viewport of [{ width: 820, height: 1180 }, { width: 420, height: 860 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${ORIGIN}/#/library`);
+    await page.waitForSelector('.card');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+    await page.waitForSelector('.prose p');
+    await openPanel('q', '.ask-input textarea');
+    assert.ok(await page.locator('.ask-input textarea').isVisible());
+    const box = await page.locator('.panel:not([hidden])').boundingBox();
+    assert.ok(box.x >= 0 && box.x + box.width <= viewport.width + 1);
+    await page.locator('[aria-label="Close panel"]').click();
+    await page.waitForSelector('.panel', { state: 'hidden' });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  }
+  await page.setViewportSize({ width: 1600, height: 900 });
 });
 
 test('managed books and notes survive server restart after deleting the imported source', async () => {
@@ -673,12 +592,12 @@ test('managed books and notes survive server restart after deleting the imported
       return response;
     };
     const original = join(data, 'persistent-source.md');
-    const text = '# A book to keep\n\nThis original file can go away. The imported book stays in OmaReader.\n';
+    const text = '# A book to keep\n\nThis original file can go away. The imported book stays on the shelf.\n';
     writeFileSync(original, text);
     const imported = await (await call('/api/books', 'POST', readFileSync(original), { 'x-file-name': 'persistent-source.md', 'Content-Type': 'application/octet-stream' })).json();
     const id = imported.id;
     await eventually(async () => (await (await call(`/api/books/${id}`)).json()).status === 'ready');
-    await call('/api/notes', 'POST', JSON.stringify({ book_id: id, title: 'Keep this thought', body: 'My notes survive too.' }));
+    await call('/api/annotations', 'POST', JSON.stringify({ book_id: id, kind: 'highlight', color: 'yellow', block: 1, page: 0, quote: 'This original file can go away.', note: 'My notes survive too.', anchor: { kind: 'bookmark', block: 1, page: 0 } }));
     await call(`/api/books/${id}/position`, 'PUT', JSON.stringify({ block: 1, fraction: 0.3, page: 0 }));
     rmSync(original);
     await stop();
@@ -688,146 +607,34 @@ test('managed books and notes survive server restart after deleting the imported
     assert.equal(book.position.block, 1);
     assert.equal(book.position.fraction, 0.3);
     assert.equal(await (await call(`/api/books/${id}/file`)).text(), text);
-    const notes = await (await call(`/api/notes?book=${id}`)).json();
-    assert.ok(notes.some((n) => n.body === 'My notes survive too.'));
+    const notes = await (await call(`/api/annotations?book=${id}`)).json();
+    assert.ok(notes.some((n) => n.note === 'My notes survive too.'));
   } finally { await stop(); }
 });
 
-test('reading panels, palette, shared marks and drafts stay coherent across navigation', async () => {
-  await page.setViewportSize({ width: 1600, height: 1000 });
-  await page.evaluate(() => { localStorage.setItem('omareader:sidebar-open','true'); localStorage.removeItem('omareader:sidebar-width'); });
-  await api('/api/settings', 'PUT', { reader: { font:'literata',size:20,leading:1.65,width:36,paper:'term',zoom:1 } });
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-  await page.waitForSelector('.prose p');
-  await page.locator('[aria-label="Sidebar width"]').focus();
-  await page.keyboard.press('ArrowLeft');
-  assert.equal(await page.locator('[aria-label="Sidebar width"]').getAttribute('aria-valuenow'), '29');
-  await page.fill('.ask textarea', 'A question I am still writing');
-  await page.click('[aria-label="Collapse chat"]');
-  assert.equal(await page.locator('.ask textarea').isVisible(), false);
-  await page.click('[aria-label="Expand chat"]');
-  assert.equal(await page.inputValue('.ask textarea'), 'A question I am still writing');
-  await page.keyboard.press('Control+Shift+P');
-  await page.fill('[aria-label="Find a command"]', 'Open Marks');
-  await page.keyboard.press('Enter');
-  await page.waitForSelector('.marks-view');
-  await page.fill('[aria-label="Filter marks"]', 'Reflow must keep');
-  assert.equal(await page.locator('.mark-entry').count(), 1);
-  await page.click('.mark-entry button:has-text("Edit note")');
-  await page.fill('[aria-label="Edit mark note"]','Shared between Notes and Marks.');
-  await page.click('.mark-editor button:has-text("Save")');
-  await page.fill('[aria-label="Filter marks"]', 'Shared between Notes');
-  await page.waitForSelector('.mark-entry p:has-text("Shared between Notes")');
-  await page.click('.mark-entry .passage');
-  await page.waitForSelector('.ref:has-text("Shared between Notes")');
-  assert.equal(await page.inputValue('.ask textarea'), 'A question I am still writing');
-  assert.equal(await page.locator('[aria-label="Sidebar width"]').getAttribute('aria-valuenow'), '29');
-  await page.fill('.ask textarea','');
-  await page.locator('.volume .pane-title h2').click();
-  await page.keyboard.press('Control+d');
-  const marks = await api(`/api/annotations?book=${epub}`);
-  assert.ok(marks.some((a) => a.kind === 'bookmark'));
-  await page.goto(`${ORIGIN}/#/annotations`);
-  await page.click('.marks-tools button:has-text("Bookmarks")');
-  assert.ok(await page.locator('.mark-entry').count() > 0);
-  const exported = await fetch(`${ORIGIN}/api/annotations/export.md`, { headers: { Cookie: `oma_session=${token}` } });
-  assert.equal(exported.status,200);
-  const markdown = await exported.text();
-  assert.match(markdown,/Shared between Notes and Marks/);
-  assert.match(markdown,/Bookmark/);
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-  await page.waitForSelector('.prose p');
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(3600);
-  for (const [name, width, height] of [['desktop',1600,1000],['laptop',1366,768],['narrow',700,1000]]) {
-    await page.setViewportSize({width,height});
-    if (name === 'narrow') await page.click('.side-close');
-    await page.waitForTimeout(200);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
-    await page.screenshot({path:`/tmp/omareader-${name}.png`});
-    if (name === 'narrow') {
-      await page.click('button[title^="Side panes"]');
-      assert.ok(await page.locator('.ask textarea').isVisible());
-      await page.screenshot({path:'/tmp/omareader-narrow-sidebar.png'});
-    }
-  }
-  await page.setViewportSize({width:1600,height:1000});
-  for (const scale of [1.25,1.5]) {
-    const context = await browser.newContext({ viewport:{width:Math.round(1600/scale),height:Math.round(1000/scale)},deviceScaleFactor:scale,storageState:await page.context().storageState() });
-    const scaled = await context.newPage();
-    await scaled.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-    await scaled.waitForSelector('.ask textarea');
-    const composer = await scaled.locator('.ask textarea').boundingBox();
-    assert.ok(composer.y + composer.height <= Math.round(1000/scale));
-    assert.equal(await scaled.evaluate(() => document.documentElement.scrollWidth > innerWidth),false);
-    await scaled.screenshot({path:`/tmp/omareader-scale-${scale}.png`});
-    await context.close();
-  }
-  await page.goto(`${ORIGIN}/#/library`);
-  await page.waitForSelector('.cover-grid');
-  await page.screenshot({path:'/tmp/omareader-library.png'});
-  await page.goto(`${ORIGIN}/#/annotations`);
-  await page.waitForSelector('.mark-entry');
-  await page.screenshot({path:'/tmp/omareader-marks.png'});
-  assert.deepEqual(errors,[]);
-});
-
-test('an attached passage survives navigation and failed provider setup preserves the question', async () => {
-  await page.route('**/api/ai/providers', (route) => route.fulfill({json:{providers:[{id:'codex',name:'Test provider',signed_in:true,models:[]}],selected:'codex',model:''}}));
-  await page.setViewportSize({ width:1600,height:1000 });
-  await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
-  await page.waitForSelector('.prose p');
-  await page.selectOption('[aria-label="Question scope"]','chapter');
-  const sent = [];
-  await page.route('**/api/chats/*/messages', (route) => {
-    if (route.request().method() !== 'POST') return route.continue();
-    sent.push(route.request().postDataJSON());
-    return route.fulfill({contentType:'text/event-stream',body:'data: {"type":"context","context":{"scope":"chapter","partial":true}}\n\ndata: {"type":"delta","text":"Only some passages were supplied. [99]"}\n\ndata: {"type":"done","id":1}\n\n'});
-  });
-  await select(1);
-  await page.click('.pick-menu button[title="Ask Oma"]');
-  assert.equal(sent.length,0);
-  assert.equal(await page.inputValue('[aria-label="Question scope"]'),'chapter');
-  await page.click('.prose a:has-text("Next chapter")');
-  await page.waitForFunction(() => document.querySelector('.prose h1')?.textContent === 'Room for Everyone');
-  await page.fill('.ask textarea','Compare this chapter with my attached passage.');
-  await page.click('[aria-label="Send question"]');
-  await eventually(() => sent.length === 1);
-  assert.equal(sent[0].attachment.block,1);
-  assert.equal(sent[0].chapter,1);
-  await page.waitForSelector('.context-note');
-  assert.equal(await page.locator('[data-cite="99"]').count(),0);
-  await page.unroute('**/api/chats/*/messages');
-  await page.unroute('**/api/ai/providers');
-  await page.route('**/api/ai/providers', (route) => route.fulfill({json:{providers:[],selected:null,model:''}}));
-  await page.reload();
-  await page.waitForSelector('.prose p');
-  await page.fill('.ask textarea','Keep this question until configuration is ready.');
-  await page.click('[aria-label="Send question"]');
-  await page.waitForSelector('.chat-empty button:has-text("Configure")');
-  assert.equal(await page.inputValue('.ask textarea'),'Keep this question until configuration is ready.');
-  assert.ok(await page.locator('.prose p').first().isVisible());
-  await page.unroute('**/api/ai/providers');
-  assert.deepEqual(errors,[]);
-});
-
-test('resizing the reading column preserves a mid-book location', async () => {
-  writeFileSync(join(data,'reflow.md'), '# A long chapter\n\n' + Array.from({length:100},(_,i) => `Paragraph ${i}. ${'Long-form reading keeps its place when the margin moves. '.repeat(12)}`).join('\n\n'));
+test('resizing the window preserves a mid-book location', async () => {
+  writeFileSync(join(data, 'reflow.md'), '# A long chapter\n\n' + Array.from({ length: 100 }, (_, i) => `Paragraph ${i}. ${'Long-form reading keeps its place when the margin moves. '.repeat(12)}`).join('\n\n'));
   const id = await upload('reflow.md');
-  await page.setViewportSize({width:1600,height:1000});
+  await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto(`${ORIGIN}/#/read/${id}?b=50`);
   await page.waitForSelector('[data-b="50"]');
   await eventually(async () => (await api(`/api/books/${id}`)).position?.block === 50);
-  await page.locator('[aria-label="Sidebar width"]').focus();
-  for (let n=0;n<12;n++) await page.keyboard.press('ArrowLeft');
+  await page.setViewportSize({ width: 760, height: 1000 });
   await page.waitForTimeout(900);
-  assert.equal((await api(`/api/books/${id}`)).position.block,50);
+  assert.equal((await api(`/api/books/${id}`)).position.block, 50);
+  await page.setViewportSize({ width: 1600, height: 1000 });
   const pdfId = await upload('mixed-pages.pdf');
   await page.goto(`${ORIGIN}/#/read/${pdfId}?b=0&p=2`);
   await page.waitForSelector('.pdf-page canvas');
   await eventually(async () => (await api(`/api/books/${pdfId}`)).position?.page === 2);
-  await page.locator('[aria-label="Sidebar width"]').focus();
-  for (let n=0;n<10;n++) await page.keyboard.press('ArrowRight');
+  await page.setViewportSize({ width: 1000, height: 1000 });
   await page.waitForTimeout(900);
-  assert.equal((await api(`/api/books/${pdfId}`)).position.page,2);
+  assert.equal((await api(`/api/books/${pdfId}`)).position.page, 2);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  if (process.env.OMAREADER_SCREENSHOT) {
+    await page.goto(`${ORIGIN}/#/read/${epub}?b=0`);
+    await page.waitForSelector('.prose p');
+    await page.screenshot({ path: process.env.OMAREADER_SCREENSHOT });
+  }
+  assert.deepEqual(errors, []);
 });

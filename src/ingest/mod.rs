@@ -96,7 +96,7 @@ pub fn parse_file(path: &Path, file_name: &str, book_id: &str, paths: &Paths) ->
             let _ = fs::remove_file(&converted);
             result
         }
-        other => bail!("OmaReader can't open .{other} files yet."),
+        other => bail!("Kōyō can't open .{other} files yet."),
     }
 }
 
@@ -220,7 +220,7 @@ pub enum Registered {
 pub fn register(db: &Db, paths: &Paths, temp: &Path, file_name: &str) -> Result<Registered> {
     let ext = extension(file_name);
     if !NATIVE.contains(&ext.as_str()) && !VIA_CALIBRE.contains(&ext.as_str()) {
-        bail!("OmaReader can't open .{ext} files yet.");
+        bail!("Kōyō can't open .{ext} files yet.");
     }
     let id = hash_file(temp)?;
     let existing: Option<String> = {

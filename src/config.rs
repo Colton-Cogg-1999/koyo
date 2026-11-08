@@ -5,7 +5,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Everything OmaReader owns lives under one directory, so backing up or syncing
+/// Everything Kōyō owns lives under one directory, so backing up or syncing
 /// that directory is a complete backup of the library, notes and audio.
 #[derive(Clone, Debug)]
 pub struct Paths {

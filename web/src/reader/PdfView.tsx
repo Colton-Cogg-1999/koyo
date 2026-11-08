@@ -5,7 +5,7 @@ import { api, urls } from '../api';
 import type { Annotation, BlockLocation } from '../types';
 import { failure } from '../ui';
 import { parseAnchor } from './anchors';
-import type { NotePositions, ViewProps } from './ReflowView';
+import type { ViewProps } from './ReflowView';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -14,7 +14,7 @@ type Rect = [number, number, number, number, number];
 interface Overlay {
   page: number;
   rect: [number, number, number, number];
-  kind: 'reading' | 'flash';
+  kind: 'flash';
 }
 
 function PdfPage({ doc, number, width, ratio, live, annotations, overlays, night }: {
@@ -100,7 +100,7 @@ function mergeRects(rects: Rect[]) {
   return merged;
 }
 
-export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPick, onHit, onNotes }: ViewProps) {
+export function PdfView({ book, prefs, annotations, jump, night, onLocation, onPick, onHit }: ViewProps) {
   const [doc, setDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [ratios, setRatios] = useState<number[]>([]);
   const [width, setWidth] = useState(0);
@@ -145,7 +145,7 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
     const box = scroller.current;
     if (!box) return;
     const measure = () => {
-      const next = Math.min(1400, Math.max(320, box.clientWidth - 112)) * prefs.zoom;
+      const next = Math.min(920, Math.max(320, box.clientWidth - 112)) * prefs.zoom;
       if (next === measuredWidth.current) return;
       if (measuredWidth.current) resizeAnchor.current = readingAnchor.current;
       measuredWidth.current = next;
@@ -185,17 +185,8 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
       for (let n = low; n <= high; n++) next.add(n);
       return next;
     });
-    const positions: NotePositions = new Map();
-    for (const annotation of annotations) {
-      const anchor = parseAnchor(annotation);
-      if (!annotation.note || anchor?.kind !== 'pdf' || !anchor.rects.length) continue;
-      const [at, x, y, w] = anchor.rects[0] as Rect;
-      const bounds = pages[at - 1]?.getBoundingClientRect();
-      if (bounds) positions.set(annotation.id, { x: bounds.left + (x + w) * bounds.width, y: bounds.top + y * bounds.height });
-    }
-    onNotes(positions);
     void blocksOn(page).then((list) => onLocation(list[0]?.seq ?? pageBlocks.current.get(page - 1)?.at(-1)?.seq ?? 0, fraction, page, (page - 1 + fraction) / Math.max(1, pageCount))).catch(() => {});
-  }, [pageCount, blocksOn, onLocation, annotations, onNotes]);
+  }, [pageCount, blocksOn, onLocation]);
 
   const scrollToPage = useCallback((page: number, fraction: number) => {
     const box = scroller.current;
@@ -237,34 +228,6 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
       report();
     })().catch(failure);
   }, [doc, width, jump]);
-
-  useEffect(() => {
-    if (!mark) {
-      setOverlays((list) => list.filter((o) => o.kind !== 'reading'));
-      return;
-    }
-    let live = true;
-    (async () => {
-      const cached = located.current.get(mark.block) ?? (await api.block(book.id, mark.block));
-      located.current.set(mark.block, cached);
-      if (!live || cached.x === null) return;
-      setOverlays((list) => [...list.filter((o) => o.kind !== 'reading'), { page: cached.page, rect: [cached.x!, cached.y!, cached.w!, cached.h!], kind: 'reading' }]);
-      const box = scroller.current;
-      const holder = pagesBox.current;
-      const element = holder?.children[cached.page - 1];
-      if (box && element) {
-        const rect = element.getBoundingClientRect();
-        const view = box.getBoundingClientRect();
-        const top = rect.top + cached.y! * rect.height;
-        if (top < view.top || top > view.bottom - 80) {
-          box.scrollBy({ top: top - view.top - view.height * 0.25, behavior: 'smooth' });
-        }
-      }
-    })().catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [mark?.block]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -348,7 +311,7 @@ export function PdfView({ book, prefs, annotations, jump, mark, onLocation, onPi
             live={visible.has(number)}
             annotations={annotations}
             overlays={overlays.filter((o) => o.page === number)}
-            night={prefs.paper === 'term'}
+            night={night}
           />
         ))}
       </div>

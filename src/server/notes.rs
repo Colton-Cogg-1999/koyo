@@ -194,7 +194,7 @@ async fn export_all(State(state): State<AppState>) -> Result<Response, ApiError>
     };
     let mut markdown = String::new();
     for id in ids { markdown.push_str(&notes::book_markdown(&state.db, &id)?.1); markdown.push_str("\n---\n\n"); }
-    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8"), (header::CONTENT_DISPOSITION, "attachment; filename=\"OmaReader marks.md\"")], markdown).into_response())
+    Ok(([(header::CONTENT_TYPE, "text/markdown; charset=utf-8"), (header::CONTENT_DISPOSITION, "attachment; filename=\"Koyo notes.md\"")], markdown).into_response())
 }
 
 pub fn routes() -> Router<AppState> {

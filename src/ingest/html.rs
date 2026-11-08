@@ -1,4 +1,4 @@
-//! Turns untrusted (X)HTML into OmaReader's block model. Output is built only from an
+//! Turns untrusted (X)HTML into Kōyō's block model. Output is built only from an
 //! allowlist, so this walker doubles as the sanitizer: scripts, styles, event handlers
 //! and remote resources never reach the page.
 //!

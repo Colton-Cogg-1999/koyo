@@ -34,7 +34,9 @@ function pointAt(block: HTMLElement, offset: number): [Text, number] | null {
 export function anchorFromSelection(selection: Selection): { anchor: TextAnchor; quote: string; rect: DOMRect } | null {
   if (selection.isCollapsed || !selection.rangeCount) return null;
   const range = selection.getRangeAt(0);
-  const quote = selection.toString().replace(/\s+/g, ' ').trim();
+  // The range's text follows the DOM. Selection text follows layout, which loses the space
+  // after a floated drop cap ("Alibrary").
+  const quote = range.toString().replace(/\s+/g, ' ').trim();
   const startBlock = blockOf(range.startContainer);
   const endBlock = blockOf(range.endContainer);
   if (!quote || !startBlock || !endBlock) return null;
@@ -116,21 +118,8 @@ export function paintAnnotations(root: HTMLElement, annotations: Annotation[]) {
   }
 }
 
-export function paintReading(root: HTMLElement | null, mark: { block: number; start: number; end: number } | null) {
-  const block = mark && root?.querySelector<HTMLElement>(`[data-b="${mark.block}"]`);
-  if (!block || !mark) return void CSS.highlights.delete('oma-reading');
-  const from = pointAt(block, mark.start);
-  const to = pointAt(block, mark.end);
-  if (!from || !to) return void CSS.highlights.delete('oma-reading');
-  const range = document.createRange();
-  range.setStart(from[0], from[1]);
-  range.setEnd(to[0], to[1]);
-  setHighlight('oma-reading', [range]);
-}
-
 export function clearPaint() {
   for (const color of COLORS) CSS.highlights.delete(`oma-${color}`);
-  CSS.highlights.delete('oma-reading');
 }
 
 /** Finds the highlight under a click, since painted ranges have no elements to target. */

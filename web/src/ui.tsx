@@ -1,63 +1,63 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Moon, SunMedium } from 'lucide-react';
 import { urls } from './api';
+import { navigate } from './route';
+import { toggleTheme, useTheme } from './theme';
 import type { Book } from './types';
 
-export function Logo({ height = 26 }: { height?: number }) {
-  return <span className="logo" role="img" aria-label="OmaReader" style={{ height, width: height * 4 }} />;
+/** The product name lives here alone, so a rename is one line. */
+export const NAME = 'Kōyō';
+
+/** The mark is the rising sun and nothing else: a red disc. */
+export function Mark({ size = 24 }: { size?: number }) {
+  return <i className="mark" style={{ width: size, height: size }} aria-hidden="true" />;
 }
 
-export function Pane({ title, tools, className = '', children }: { title?: ReactNode; tools?: ReactNode; className?: string; children: ReactNode }) {
+export function Brand() {
   return (
-    <section className={`pane ${className}`}>
-      {title !== undefined && (
-        <header className="pane-title">
-          <h2>{title}</h2>
-          {tools && <div className="pane-tools">{tools}</div>}
-        </header>
-      )}
-      {children}
-    </section>
+    <button className="brand" onClick={() => navigate('library')} title="Library">
+      <Mark />
+      <span className="brand-word">{NAME}</span>
+    </button>
   );
 }
 
-export function Gauge({ value }: { value: number }) {
-  return <span className="gauge" aria-hidden="true"><b style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%` }} /></span>;
+/** A small filled disc that marks anything the AI says or does. */
+export function Sun({ size = 10 }: { size?: number }) {
+  return <i className="sun" style={{ width: size, height: size }} aria-hidden="true" />;
 }
 
-export function Cover({ book, className = '' }: { book: Pick<Book, 'id' | 'title' | 'has_cover'>; className?: string }) {
+export function TopBar({ children }: { children: ReactNode }) {
+  return <header className="topbar">{children}</header>;
+}
+
+export function ThemeToggle() {
+  const { night } = useTheme();
+  return (
+    <button className="icon" title={night ? 'Day (d)' : 'Night (d)'} aria-label={night ? 'Switch to day' : 'Switch to night'} onClick={toggleTheme}>
+      {night ? <SunMedium size={17} /> : <Moon size={16} />}
+    </button>
+  );
+}
+
+const TONES = ['#8e2f38', '#a9512d', '#9c7a35', '#5f6b3e', '#344360', '#5d3a52', '#46403b', '#6e5844'];
+
+export function Cover({ book, className = '' }: { book: Pick<Book, 'id' | 'title' | 'author' | 'has_cover'>; className?: string }) {
   const [failed, setFailed] = useState(false);
   if (book.has_cover && !failed) {
-    return <img className={`cover ${className}`} src={urls.cover(book.id)} alt="" loading="lazy" onError={() => setFailed(true)} />;
+    return <img className={`cover ${className}`} src={urls.cover(book.id)} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />;
   }
-  return <div className={`cover cover-made ${className}`}><span>{book.title}</span></div>;
-}
-
-export function Empty({ title, children }: { title: string; children?: ReactNode }) {
+  // Books without a cover are bound like a Japanese wahon: dyed paper in an autumn tone,
+  // a stitched spine, and a cream title slip.
+  const tone = TONES[[...book.title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TONES.length];
   return (
-    <div className="empty">
-      <Logo height={46} />
-      <h2>{title}</h2>
-      {children && <p>{children}</p>}
+    <div className={`cover cover-made ${className}`} style={{ '--tone': tone } as React.CSSProperties}>
+      <span className="slip">
+        <strong>{book.title}</strong>
+        {book.author && <small>{book.author}</small>}
+      </span>
     </div>
   );
-}
-
-export function clock(ms: number) {
-  const total = Math.max(0, Math.round(ms / 1000));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = String(total % 60).padStart(2, '0');
-  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
-}
-
-export function bytes(value: number) {
-  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
-  if (value < 1024 ** 3) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-  return `${(value / 1024 ** 3).toFixed(2)} GB`;
-}
-
-export function when(timestamp: number) {
-  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 interface Toast {
@@ -77,7 +77,7 @@ export function toast(text: string, tone: Toast['tone'] = 'info') {
   window.setTimeout(() => {
     toasts = toasts.filter((t) => t.id !== id);
     toastListeners.forEach((l) => l());
-  }, tone === 'error' ? 9000 : 3500);
+  }, tone === 'error' ? 8000 : 3200);
 }
 
 export function failure(error: unknown) {
@@ -104,4 +104,23 @@ export function useAsync<T>(load: () => Promise<T>, deps: unknown[]) {
     };
   }, [...deps, version]);
   return [value, () => setVersion((v) => v + 1), setValue] as const;
+}
+
+/** Closes a popover on an outside press or Escape. */
+export function useDismiss(open: boolean, close: () => void, inside: () => (Element | null)[]) {
+  useEffect(() => {
+    if (!open) return;
+    const press = (event: PointerEvent) => {
+      if (!inside().some((el) => el?.contains(event.target as Node))) close();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); close(); }
+    };
+    document.addEventListener('pointerdown', press);
+    window.addEventListener('keydown', key, true);
+    return () => {
+      document.removeEventListener('pointerdown', press);
+      window.removeEventListener('keydown', key, true);
+    };
+  }, [open]);
 }

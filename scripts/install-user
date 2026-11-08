@@ -13,4 +13,4 @@ install -Dm644 "$ROOT/LICENSE" "$prefix/share/licenses/omareader/LICENSE"
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$prefix/share/applications"
 fi
-printf 'Installed OmaReader under %s. Ensure %s/bin is in your desktop PATH.\n' "$prefix" "$prefix"
+printf 'Installed Kōyō under %s. Ensure %s/bin is in your desktop PATH.\n' "$prefix" "$prefix"

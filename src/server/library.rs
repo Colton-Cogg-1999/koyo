@@ -120,6 +120,7 @@ async fn update_book(State(state): State<AppState>, Path(id): Path<String>, Json
 }
 
 async fn delete_book(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult {
+    #[cfg(feature = "narration")]
     state.tts.interrupt(&id);
     let removed = state.db.conn().execute("DELETE FROM books WHERE id=?1", [&id])?;
     if removed == 0 {
@@ -327,13 +328,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/settings", get(get_settings).put(put_settings))
         .route("/api/storage", get(storage))
         .route("/api/storage/open-folder", post(open_library_folder))
-        .route("/api/theme", get(theme))
         .route("/api/notes/open-folder", post(open_notes_folder))
         .route("/api/open", post(open_external))
-}
-
-async fn theme() -> ApiResult {
-    Ok(Json(crate::theme::current()))
 }
 
 #[derive(Deserialize)]

@@ -1,13 +1,11 @@
-import '@fontsource/ibm-plex-mono/400.css';
-import '@fontsource/ibm-plex-mono/500.css';
-import '@fontsource-variable/jetbrains-mono';
-import '@fontsource-variable/newsreader';
-import '@fontsource-variable/newsreader/wght-italic.css';
 import '@fontsource-variable/literata';
+import '@fontsource-variable/literata/wght-italic.css';
+import '@fontsource/shippori-mincho/latin-500.css';
+import '@fontsource/shippori-mincho/latin-700.css';
 import { Component, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import { startTheme } from './theme';
+import './theme';
 import './styles.css';
 
 /** A rendering error shows as a message with a way out, never a blank window. */
@@ -22,12 +20,11 @@ class Boundary extends Component<{ children: ReactNode }, { error: Error | null 
     if (!this.state.error) return this.props.children;
     return (
       <div className="crash">
-        <p>ERR&gt; {this.state.error.message}</p>
-        <button className="solid" onClick={() => { location.hash = '#/library'; location.reload(); }}>back to library</button>
+        <p>Something broke: {this.state.error.message}</p>
+        <button className="solid" onClick={() => { location.hash = '#/library'; location.reload(); }}>Back to library</button>
       </div>
     );
   }
 }
 
-startTheme();
 createRoot(document.getElementById('root')!).render(<Boundary><App /></Boundary>);

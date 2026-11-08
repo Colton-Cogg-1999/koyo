@@ -297,7 +297,7 @@ pub fn parse(path: &Path, book_id: &str, book_dir: &Path) -> Result<ParsedBook> 
         next_seq += added;
     }
     if next_seq == 0 {
-        bail!("This EPUB has no text that OmaReader can read.");
+        bail!("This EPUB has no text that Kōyō can read.");
     }
 
     let locate = |href: &str| -> Option<u32> {

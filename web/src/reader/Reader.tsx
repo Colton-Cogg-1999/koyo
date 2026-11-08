@@ -1,69 +1,63 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Bookmark, Maximize2, Minimize2, PanelRight, PenLine, Search, Sparkles, Trash2, Type } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft, BookOpen, Copy, Highlighter, MessageSquareText, NotebookText, Settings2, Sparkle, Trash2 } from 'lucide-react';
 import { api } from '../api';
-import { player, usePlayer } from '../audio';
+import { editingTarget, useLocalPreference } from '../preferences';
 import { navigate } from '../route';
-import { clearSession, publishSession, type Location } from '../session';
-import { defaultPrefs, type Annotation, type BookDetail, type Color, type ReaderPrefs } from '../types';
-import { failure, Pane, toast, useAsync } from '../ui';
-import { useLocalPreference, editingTarget, readerCommand } from '../preferences';
-import { ReadingProgress } from './ReadingProgress';
-import { ReaderSidebar } from './ReaderSidebar';
-import { TypePanel } from './TypePanel';
-import { Agent } from './Agent';
-import { Margin, type MarginTab } from './Margin';
-import { PdfView } from './PdfView';
-import { ReflowView, type Jump, type NotePositions, type Picked } from './ReflowView';
+import { useTheme } from '../theme';
+import { normalizePrefs, defaultPrefs, type Annotation, type Color, type ReaderPrefs, type ReadingLocation } from '../types';
+import { Brand, failure, NAME, Sun, toast, TopBar, useAsync, useDismiss } from '../ui';
+import { Appearance } from './Appearance';
+import { Ask, type AskSeed } from './Ask';
+import { Contents } from './Contents';
+import { COLORS, Notes } from './Notes';
+import { Tabs, type Tab } from './Panel';
+import { ReflowView, type Jump, type Picked } from './ReflowView';
 
-const COLORS: Color[] = ['blue', 'green', 'pink', 'yellow'];
-const NO_ANNOTATIONS: Annotation[] = [];
+// pdf.js is large; EPUB readers never pay for it.
+const PdfView = lazy(() => import('./PdfView').then((m) => ({ default: m.PdfView })));
 
-function samePositions(a: NotePositions, b: NotePositions) {
-  if (a.size !== b.size) return false;
-  for (const [id, at] of a) {
-    const other = b.get(id);
-    if (other?.x !== at.x || other?.y !== at.y) return false;
-  }
-  return true;
-}
-export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: string; startBlock: number | null; startPage: number | null; focus: boolean; setFocus: (on: boolean) => void }) {
+type PanelName = Tab | 'contents';
+const NONE: Annotation[] = [];
+
+export function Reader({ id, startBlock, startPage }: { id: string; startBlock: number | null; startPage: number | null }) {
   const [loadError, setLoadError] = useState(false);
-  const [book, , setBook] = useAsync(() => api.book(id).catch((error) => { setLoadError(true); throw error; }), [id]);
+  const [book] = useAsync(() => api.book(id).catch((error) => { setLoadError(true); throw error; }), [id]);
   const [annotations, reloadAnnotations, setAnnotations] = useAsync(() => api.annotations({ book: id }), [id]);
   const [prefs, setPrefs] = useState<ReaderPrefs>(defaultPrefs);
-  const [location, setLocation] = useState<Location>({ block: 0, fraction: 0, page: 1, ratio: 0 });
+  const [location, setLocation] = useState<ReadingLocation>({ block: 0, fraction: 0, page: 1, ratio: 0 });
   const [jump, setJump] = useState<Jump | null>(null);
-  const [contextMark, setContextMark] = useState<Annotation | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
-  const [editing, setEditing] = useState<{ annotation: Annotation; rect: DOMRect } | null>(null);
-  const [typeOpen, setTypeOpen] = useState(false);
-  const [sideOpen, setSideOpen] = useLocalPreference('sidebar-open', window.innerWidth > 1040);
-  const [tab, setTab] = useState<MarginTab>('margin');
-  const [askSeed, setAskSeed] = useState<{ selection: string; block: number; endBlock: number; question?: string; nonce: number } | null>(null);
-  const [notePositions, setNotePositions] = useState<NotePositions>(new Map());
-  const audio = usePlayer();
-  const saveTimer = useRef(0);
-  const pendingPosition = useRef<Location | null>(null);
+  const [hit, setHit] = useState<{ annotation: Annotation; rect: DOMRect } | null>(null);
+  const [panel, setPanel] = useLocalPreference<PanelName | null>('panel', null);
+  const [lastTab, setLastTab] = useLocalPreference<Tab>('tab', 'ask');
+  const [askOpened, setAskOpened] = useState(panel === 'ask');
+  const [focusNote, setFocusNote] = useState<{ id: string; nonce: number } | null>(null);
+  const [askSeed, setAskSeed] = useState<AskSeed | null>(null);
+  const [searchNonce, setSearchNonce] = useState(0);
+  const [appearance, setAppearance] = useState(false);
+  const [returnTo, setReturnTo] = useState<ReadingLocation | null>(null);
+  const { night } = useTheme();
   const nonce = useRef(1);
-  const [returnTo, setReturnTo] = useState<Location | null>(null);
-  const [undoMark, setUndoMark] = useState<Annotation | null>(null);
-  const currentLocation = useRef(location);
-  currentLocation.current = location;
-  const mark = audio.book === id ? audio.mark : null;
+  const saveTimer = useRef(0);
+  const pending = useRef<ReadingLocation | null>(null);
+  const here = useRef(location);
+  here.current = location;
+  const appearanceBox = useRef<HTMLDivElement>(null);
+  useDismiss(appearance, () => setAppearance(false), () => [appearanceBox.current]);
 
   useEffect(() => {
-    const refresh = () => reloadAnnotations();
-    window.addEventListener('oma-annotations-changed', refresh);
-    return () => window.removeEventListener('oma-annotations-changed', refresh);
+    api.settings().then((s) => setPrefs(normalizePrefs(s.reader))).catch(() => {});
   }, []);
 
   useEffect(() => {
-    api.settings().then((s) => s.reader && setPrefs({ ...defaultPrefs, ...(s.reader as Partial<ReaderPrefs>) })).catch(() => {});
-  }, []);
+    if (panel === 'ask') setAskOpened(true);
+    if (panel && panel !== 'contents') setLastTab(panel);
+  }, [panel]);
 
   const go = useCallback((block: number, flash = true, page?: number) => {
-    setReturnTo(currentLocation.current);
+    setReturnTo(here.current);
     setJump({ block, flash, page: page || undefined, nonce: ++nonce.current });
+    if (window.innerWidth < 900) setPanel(null);
   }, []);
 
   useEffect(() => {
@@ -73,14 +67,13 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
     else if (saved) setJump({ block: saved.block, page: saved.page || undefined, fraction: saved.fraction, nonce: ++nonce.current });
     else setJump({ block: 0, fraction: 0, nonce: ++nonce.current });
     setLocation((l) => ({ ...l, ratio: saved?.progress ?? 0, page: saved?.page || 1 }));
-    void player.load(book.id, book.title).catch(() => {});
   }, [book?.id, startBlock, startPage]);
 
   const flushPosition = useCallback(() => {
     window.clearTimeout(saveTimer.current);
-    const latest = pendingPosition.current;
+    const latest = pending.current;
     if (!latest) return;
-    pendingPosition.current = null;
+    pending.current = null;
     void api.savePosition(id, latest.block, latest.fraction, latest.page).catch(failure);
   }, [id]);
 
@@ -90,35 +83,19 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
   }, [flushPosition]);
 
   const onLocation = useCallback((block: number, fraction: number, page: number, ratio: number, endBlock?: number, visibleStart?: number) => {
-    setLocation({ block, fraction, page, ratio, endBlock, visibleStart });
-    pendingPosition.current = { block, fraction, page, ratio };
+    const next = { block, fraction, page, ratio, endBlock, visibleStart };
+    setLocation(next);
+    pending.current = next;
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(flushPosition, 700);
   }, [flushPosition]);
 
-  const onNotes = useCallback((next: NotePositions) => {
-    setNotePositions((current) => (samePositions(current, next) ? current : next));
-  }, []);
-
-  const listenFrom = useCallback(async (block: number) => {
-    const status = await api.tts();
-    if (!status.installed) return toast('Install the voice engine in the audiobook pane first.');
-    const summary = await api.audio(id);
-    const started = await api.startAudio(id, summary.status === 'none' ? status.default_voice : summary.voice!, block);
-    await player.load(id, book?.title ?? '');
-    await player.refresh();
-    if (started.tracks?.length) await player.playBlock(block);
-  }, [id, book?.title]);
-
-  const seek = useCallback((ratio: number) => {
+  const seek = (ratio: number) => {
     if (!book) return;
-    const last = book.sections.at(-1)?.last_block ?? 0;
+    setReturnTo(here.current);
     if (book.format === 'pdf') setJump({ block: -1, page: Math.max(1, Math.round(ratio * book.pages)), fraction: 0, nonce: ++nonce.current });
-    else go(Math.round(ratio * last), false);
-  }, [book, go, id]);
-
-  useEffect(() => publishSession({ book, location, go, seek, listenFrom }), [book, location, go, seek, listenFrom]);
-  useEffect(() => clearSession, []);
+    else setJump({ block: Math.round(ratio * (book.sections.at(-1)?.last_block ?? 0)), nonce: ++nonce.current });
+  };
 
   const changePrefs = (patch: Partial<ReaderPrefs>) => {
     const next = { ...prefs, ...patch };
@@ -127,254 +104,207 @@ export function Reader({ id, startBlock, startPage, focus, setFocus }: { id: str
     void api.saveSettings({ reader: next }).catch(failure);
   };
 
-  const highlight = async (color: Color, note = '') => {
-    if (!picked) return null;
-    const existing = annotations?.find((a) => a.kind === 'highlight' && a.block === picked.block && a.quote === picked.quote && JSON.stringify(JSON.parse(a.anchor), Object.keys(picked.anchor).sort()) === JSON.stringify(picked.anchor, Object.keys(picked.anchor).sort()));
-    if (existing) { setPicked(null); return existing; }
-    const created = await api.createAnnotation({ book_id: id, kind: 'highlight', color, anchor: picked.anchor, block: picked.block, page: picked.page, quote: picked.quote, note });
-    setAnnotations((list) => [...(list ?? []), created]);
-    window.getSelection()?.removeAllRanges();
+  const toggle = (name: PanelName) => setPanel((current) => (current === name ? null : name));
+  const toggleCard = () => setPanel((current) => (current && current !== 'contents' ? null : lastTab));
+  const dismissSelection = () => {
     setPicked(null);
+    setHit(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const createHighlight = async (color: Color) => {
+    if (!picked) return null;
+    const created = await api.createAnnotation({ book_id: id, kind: 'highlight', color, anchor: picked.anchor, block: picked.block, page: picked.page, quote: picked.quote, note: '' });
+    setAnnotations((list) => [...(list ?? []), created]);
     return created;
   };
 
-  const startNote = async () => {
-    const rect = picked?.rect;
-    const created = await highlight('green').catch(failure);
-    if (created && rect) setEditing({ annotation: created, rect });
+  const updateAnnotation = useCallback(async (annotationId: string, patch: { color?: Color; note?: string }) => {
+    const updated = await api.updateAnnotation(annotationId, patch);
+    setAnnotations((list) => (list ?? []).map((a) => (a.id === updated.id ? updated : a)));
+  }, []);
+
+  const deleteAnnotation = useCallback(async (annotationId: string) => {
+    await api.deleteAnnotation(annotationId);
+    setAnnotations((list) => (list ?? []).filter((a) => a.id !== annotationId));
+  }, []);
+
+  const onColor = (color: Color) => {
+    if (hit) void updateAnnotation(hit.annotation.id, { color }).catch(failure);
+    else void createHighlight(color).catch(failure);
+    dismissSelection();
   };
 
-  const askAbout = () => {
-    if (!picked) return;
-    setContextMark({ id: 'ask-context', book_id: id, kind: 'highlight', color: 'green', anchor: JSON.stringify(picked.anchor), block: picked.block, page: picked.page, quote: picked.quote, note: '', created_at: Date.now(), updated_at: Date.now() });
-    setAskSeed({ selection: picked.quote, block: picked.block, endBlock: picked.anchor.kind === 'text' ? picked.anchor.endBlock : (picked.endBlock ?? picked.block), nonce: ++nonce.current });
-    setSideOpen(true);
-    readerCommand('focus-chat');
-    window.getSelection()?.removeAllRanges();
-    setPicked(null);
+  const onNote = async () => {
+    const target = hit?.annotation ?? await createHighlight('yellow').catch((error) => { failure(error); return null; });
+    dismissSelection();
+    if (!target) return;
+    setPanel('notes');
+    setFocusNote({ id: target.id, nonce: ++nonce.current });
   };
 
-  const bookmarks = useMemo(() => (annotations ?? []).filter((a) => a.kind === 'bookmark'), [annotations]);
-  const here = bookmarks.find((b) => (book?.format === 'pdf' ? b.page === location.page : b.block === location.block));
-
-  const toggleBookmark = async () => {
-    if (here) {
-      await api.deleteAnnotation(here.id);
-      setAnnotations((list) => (list ?? []).filter((a) => a.id !== here.id));
-    } else {
-      const anchor = { kind: 'bookmark', block: location.block, page: location.page };
-      const created = await api.createAnnotation({ book_id: id, kind: 'bookmark', anchor, block: location.block, page: location.page, quote: chapterTitle(book, location.block) });
-      setAnnotations((list) => [...(list ?? []), created]);
-    }
+  const onAsk = () => {
+    const source = hit
+      ? { selection: hit.annotation.quote, block: hit.annotation.block, endBlock: endOf(hit.annotation) }
+      : picked && { selection: picked.quote, block: picked.block, endBlock: picked.anchor.kind === 'text' ? picked.anchor.endBlock : (picked.endBlock ?? picked.block) };
+    dismissSelection();
+    if (!source) return;
+    setAskSeed({ ...source, nonce: ++nonce.current });
+    setPanel('ask');
   };
+
+  // A press anywhere but the bar dismisses it. Pointerdown comes before the click that may
+  // open a highlight again, so reopening still works.
+  useEffect(() => {
+    if (!hit && !picked) return;
+    const press = (event: PointerEvent) => {
+      if (!(event.target as Element).closest?.('.selection-bar')) setHit(null);
+    };
+    document.addEventListener('pointerdown', press);
+    return () => document.removeEventListener('pointerdown', press);
+  }, [hit, picked]);
+
+    const chapters = book?.chapters ?? [];
+  const chapterIndex = chapters.findLastIndex((c) => c.start <= location.block);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (editingTarget(event.target)) return;
-      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
-        if (event.key.toLowerCase() === 'd') { event.preventDefault(); void toggleBookmark().catch(failure); }
-        if (event.key.toLowerCase() === 'b') { event.preventDefault(); setSideOpen((v) => !v); }
-        if (event.key.toLowerCase() === 'j') { event.preventDefault(); setSideOpen(true); readerCommand('focus-chat'); }
+      const mod = event.ctrlKey || event.metaKey;
+      if (mod && !event.altKey && event.key.toLowerCase() === 'f') { event.preventDefault(); setPanel('contents'); setSearchNonce((n) => n + 1); return; }
+      if (mod && !event.altKey && event.key.toLowerCase() === 'j') { event.preventDefault(); setPanel('ask'); window.setTimeout(() => window.dispatchEvent(new Event('koyo-focus-ask')), 0); return; }
+      if (event.key === 'Escape') {
+        if (picked || hit) dismissSelection();
+        else if (!editingTarget(event.target) && panel) setPanel(null);
         return;
       }
-      if (event.altKey) return;
-      const chapters = book?.chapters ?? [];
-      const current = chapters.findLastIndex((c) => c.start <= location.block);
+      if (editingTarget(event.target) || mod || event.altKey) return;
       switch (event.key) {
-        case 'f': setFocus(!focus); break;
-        case '\\': setSideOpen((open) => !open); break;
-        case 't': setSideOpen(true); setTab('index'); break;
-        case 'm': setSideOpen(true); setTab('margin'); break;
-        case 'n': setSideOpen(true); setTab('notebook'); break;
-        case 'b': void toggleBookmark().catch(failure); break;
-        case 'l': player.toggle(); break;
-        case ']': if (chapters[current + 1]) go(chapters[current + 1].start, false); break;
-        case '[': if (chapters[Math.max(0, current - 1)]) go(chapters[Math.max(0, current - 1)].start, false); break;
-        case 'Escape':
-          setTypeOpen(false);
-          setEditing(null);
-          if (focus) setFocus(false);
-          break;
+        case 'c': toggle('contents'); break;
+        case 'n': toggle('notes'); break;
+        case 'h': toggle('highlights'); break;
+        case 'q': toggle('ask'); break;
+        case '/': event.preventDefault(); setPanel('contents'); setSearchNonce((n) => n + 1); break;
+        case ']': if (chapters[chapterIndex + 1]) go(chapters[chapterIndex + 1].start, false); break;
+        case '[': if (chapters[Math.max(0, chapterIndex - 1)]) go(chapters[Math.max(0, chapterIndex - 1)].start, false); break;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  useEffect(() => {
-    const command = (event: Event) => {
-      switch ((event as CustomEvent<string>).detail) {
-        case 'bookmark': void toggleBookmark().catch(failure); break;
-        case 'sidebar': setSideOpen((v) => !v); break;
-        case 'toggle-notes': case 'toggle-chat': case 'focus-chat': setSideOpen(true); break;
-        case 'chapters': setSideOpen(true); setTab('index'); break;
-        case 'appearance': setTypeOpen((v) => !v); break;
-        case 'ask-selection': askAbout(); break;
-      }
-    };
-    window.addEventListener('oma-reader-command', command);
-    return () => window.removeEventListener('oma-reader-command', command);
-  });
-  useEffect(() => {
-    if (!undoMark) return;
-    const timer = window.setTimeout(() => setUndoMark(null), 6000);
-    return () => window.clearTimeout(timer);
-  }, [undoMark]);
+  if (loadError) return <div className="reader-message">This book could not be opened. <button className="ghost" onClick={() => navigate('library')}>Back to the shelf</button></div>;
+  if (!book || !jump) return <div className="reader-message"><Sun size={14} /></div>;
+  if (book.status !== 'ready') return <div className="reader-message">{book.status === 'failed' ? book.error : 'Preparing this book…'}</div>;
 
-  if (loadError) return <div className="reader-loading">This book could not be opened. <button className="ghost" onClick={() => navigate('library')}>Back to Library</button></div>;
-  if (!book || !jump) return <div className="reader-loading">loading…</div>;
-  if (book.status !== 'ready') {
-    return <div className="reader-loading">{book.status === 'failed' ? book.error : 'indexing…'}</div>;
-  }
-
-  const props = { book, prefs, annotations: contextMark ? [...(annotations ?? []), contextMark] : annotations ?? NO_ANNOTATIONS, jump, mark, onLocation, onPick: setPicked, onNotes,
+  const list = annotations ?? NONE;
+  const highlights = list.filter((a) => a.kind === 'highlight').length;
+  const viewProps = {
+    book, prefs, annotations: list, jump, night, onLocation,
+    onPick: setPicked,
     onJump: (block: number) => go(block, false),
-    onHit: (annotation: Annotation, rect: DOMRect) => { if (annotation.id !== 'ask-context') setEditing({ annotation, rect }); } };
-  const chapter = chapterTitle(book, location.block);
+    onHit: (annotation: Annotation, rect: DOMRect) => { setPicked(null); setHit({ annotation, rect }); },
+  };
+  const toolbarRect = picked?.rect ?? hit?.rect;
+  const current = hit?.annotation.color;
 
   return (
-    <div className={`reader ${focus ? 'zen' : ''}`}>
-      <Pane
-        className="volume"
-        title={<>{book.title}<i> · {chapter && chapter !== book.title ? `${chapter} · ` : ''}{Math.round(location.ratio * 100)}%</i></>}
-        tools={
-          <>
-            <button className="icon" title="Library" onClick={() => navigate('library')}><ArrowLeft size={16} /></button>
-            <button className="icon" title="Search (Ctrl+F)" onClick={() => window.dispatchEvent(new CustomEvent('oma-search', { detail: { book: id } }))}><Search size={15} /></button>
-            <button className={`icon ${typeOpen ? 'on' : ''}`} title="Text and page" onClick={() => setTypeOpen(!typeOpen)}><Type size={15} /></button>
-            <button className={`icon ${here ? 'on' : ''}`} title="Bookmark (Ctrl+D)" onClick={() => void toggleBookmark().catch(failure)}><Bookmark size={15} fill={here ? 'currentColor' : 'none'} /></button>
-            <button className={`icon ${sideOpen ? 'on' : ''}`} title="Side panes (\)" onClick={() => setSideOpen(!sideOpen)}><PanelRight size={15} /></button>
-            <button className="icon" title="Zen mode (f)" onClick={() => setFocus(!focus)}>{focus ? <Minimize2 size={15} /> : <Maximize2 size={15} />}</button>
-          </>
-        }
-      >
-        <div className="volume-body">
-          {book.format === 'pdf' ? <PdfView {...props} /> : <ReflowView {...props} />}
-          {book.chars === 0 && <div className="scanned-note">Scanned book with no text layer. Reading works; notes, Oma and audio need text.</div>}
-          {typeOpen && <TypePanel prefs={prefs} pdf={book.format === 'pdf'} onChange={changePrefs} onClose={() => setTypeOpen(false)} />}
+    <div className={`reader ${panel ? 'with-panel' : ''}`}>
+      <TopBar>
+        <Brand />
+        <span className="rule" />
+        <div className="book-title" title={`${book.title}${book.author ? ` — ${book.author}` : ''}`}>
+          <strong>{book.title}</strong>{book.author && <span> — {book.author}</span>}
         </div>
-        {picked && (
-          <div className="pick-menu" style={menuPosition(picked.rect)} onMouseDown={(event) => event.preventDefault()}>
-            <button title="Highlight" onClick={() => void highlight('green').then((a) => a && !annotations?.some((old) => old.id === a.id) && setUndoMark(a)).catch(failure)}>Highlight</button>
-            <button title="Add a note" onClick={() => void startNote()}><PenLine size={14} /> Note</button>
-            <button title="Ask Oma" onClick={() => askAbout()}><Sparkles size={14} /> Ask</button>
+        <span className="grow" />
+        <nav className="reader-tools" aria-label="Reader tools">
+          <button className={`icon ${panel === 'contents' ? 'on' : ''}`} title="Contents and search (c)" aria-label="Contents and search" aria-pressed={panel === 'contents'} onClick={() => toggle('contents')}><BookOpen size={21} strokeWidth={1.6} /></button>
+          <button className={`icon ${panel && panel !== 'contents' ? 'on' : ''}`} title="Ask, notes and highlights" aria-label="Ask, notes and highlights" aria-pressed={!!panel && panel !== 'contents'} onClick={toggleCard}>
+            <NotebookText size={21} strokeWidth={1.6} />{highlights > 0 && <b className="badge" aria-label={`${highlights} highlights`} />}
+          </button>
+          <span className="rule" />
+          <div className="anchor" ref={appearanceBox}>
+            <button className={`icon ${appearance ? 'on' : ''}`} title="Appearance" aria-label="Appearance" aria-expanded={appearance} onClick={() => setAppearance(!appearance)}><Settings2 size={20} strokeWidth={1.6} /></button>
+            {appearance && <Appearance prefs={prefs} pdf={book.format === 'pdf'} onChange={changePrefs} />}
           </div>
+        </nav>
+      </TopBar>
+
+      <div className="reader-body">
+        <div className="page" style={{ '--column': book.format === 'pdf' ? `${Math.round(920 * prefs.zoom)}px` : `${prefs.width * prefs.size}px` } as React.CSSProperties}>
+          <Suspense fallback={<div className="reader-message"><Sun size={14} /></div>}>
+            {book.format === 'pdf' ? <PdfView {...viewProps} /> : <ReflowView {...viewProps} />}
+          </Suspense>
+          {book.chars === 0 && <div className="scanned-note">This is a scanned book with no text layer. It reads fine, but notes and questions need text.</div>}
+          <footer className="progress">
+            <span className="progress-where">
+              {returnTo
+                ? <button className="ghost small" onClick={() => { setJump({ block: returnTo.block, page: returnTo.page || undefined, fraction: returnTo.fraction, nonce: ++nonce.current }); setReturnTo(null); }}><ArrowLeft size={13} /> Back</button>
+                : null}
+              {chapterIndex >= 0 && chapters.length > 1 && <span className="progress-chapter" title={chapters[chapterIndex].title}>Chapter {chapterIndex + 1} of {chapters.length}</span>}
+              {book.format === 'pdf' && <span>p. {location.page} of {book.pages}</span>}
+            </span>
+            <Scrubber ratio={location.ratio} onSeek={seek} />
+            <span className="progress-percent">{Math.round(location.ratio * 100)}%</span>
+          </footer>
+        </div>
+
+        {(panel || askOpened) && (
+          <aside className={`panel panel-${panel}`} hidden={!panel} aria-label={panel === 'contents' ? 'Contents' : 'Reading companion'}>
+            {panel === 'contents' && <Contents book={book} location={location} go={go} searchNonce={searchNonce} onClose={() => setPanel(null)} />}
+            {panel && panel !== 'contents' && <Tabs tab={panel} onTab={setPanel} onClose={() => setPanel(null)} />}
+            {(panel === 'notes' || panel === 'highlights') && <Notes mode={panel} book={book} annotations={list} focus={focusNote} go={go} onUpdate={updateAnnotation} onDelete={deleteAnnotation} />}
+            {/* Ask stays mounted once opened, so a streaming answer or a draft survives switching tabs. */}
+            {askOpened && <div className="tab-body" hidden={panel !== 'ask'}><Ask book={book} location={location} seed={askSeed} go={(block) => go(block)} onSaved={reloadAnnotations} /></div>}
+          </aside>
         )}
-        {undoMark && <div className="highlight-undo" role="status">Highlight saved <button className="tab" onClick={() => void api.deleteAnnotation(undoMark.id).then(() => { setAnnotations((list) => list?.filter((a) => a.id !== undoMark.id) ?? []); setUndoMark(null); }).catch(failure)}>Undo</button></div>}
-        <ReadingProgress book={book} location={location} seek={(ratio) => { setReturnTo(location); seek(ratio); }} back={returnTo ? () => { setJump({ block: returnTo.block, page: returnTo.page || undefined, fraction: returnTo.fraction, nonce: ++nonce.current }); setReturnTo(null); } : undefined} />
-      </Pane>
+      </div>
 
-      {(
-        <ReaderSidebar open={sideOpen && !focus} onClose={() => setSideOpen(false)} notes={<Margin
-            book={book}
-            annotations={annotations ?? NO_ANNOTATIONS}
-            positions={notePositions}
-            block={location.block}
-            bookmarks={bookmarks}
-            tab={tab}
-            setTab={setTab}
-            go={go}
-            reload={reloadAnnotations}
-            onEdit={(annotation, rect) => setEditing({ annotation, rect })}
-          />} chat={<Agent book={book} location={location} seed={askSeed} go={go} onSelectionClear={() => setContextMark(null)} />} />
-      )}
-
-      {editing && (
-        <NoteEditor
-          key={editing.annotation.id}
-          annotation={editing.annotation}
-          rect={editing.rect}
-          onClose={() => setEditing(null)}
-          onSave={async (patch) => {
-            const updated = await api.updateAnnotation(editing.annotation.id, patch);
-            setAnnotations((list) => (list ?? []).map((a) => (a.id === updated.id ? updated : a)));
-            setEditing((current) => (current ? { ...current, annotation: updated } : current));
-            setBook((current) => current);
-          }}
-          onDelete={async () => {
-            await api.deleteAnnotation(editing.annotation.id);
-            setAnnotations((list) => (list ?? []).filter((a) => a.id !== editing.annotation.id));
-            setEditing(null);
-          }}
-        />
+      {toolbarRect && (
+        <div className={`selection-bar ${barPosition(toolbarRect).below ? 'below' : 'above'}`} role="toolbar" aria-label="Selection" style={barPosition(toolbarRect).style} onMouseDown={(e) => e.preventDefault()}>
+          <button className="icon" title="Highlight" aria-label="Highlight" onClick={() => onColor(current ?? 'yellow')}><Highlighter size={17} /></button>
+          {COLORS.map((color) => (
+            <button key={color} className={`dot ${color} ${current === color ? 'on' : ''}`} title={`Highlight ${color}`} aria-label={`Highlight ${color}`} onClick={() => onColor(color)} />
+          ))}
+          <span className="rule" />
+          <button onClick={() => void onNote()}><MessageSquareText size={16} /> Note</button>
+          <button className="ask-action" onClick={onAsk}><Sparkle size={15} /> Ask {NAME}</button>
+          {hit
+            ? <button className="icon" title="Remove highlight" aria-label="Remove highlight" onClick={() => { const target = hit.annotation; dismissSelection(); void deleteAnnotation(target.id).catch(failure); }}><Trash2 size={16} /></button>
+            : <button className="icon" title="Copy" aria-label="Copy passage" onClick={() => { const text = picked?.quote ?? ''; dismissSelection(); void navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(failure); }}><Copy size={16} /></button>}
+        </div>
       )}
     </div>
   );
 }
 
-function chapterTitle(book: BookDetail | null, block: number) {
-  return book?.chapters.findLast((c) => c.start <= block)?.title ?? '';
-}
-
-function menuPosition(rect: DOMRect) {
-  const top = Math.max(8, Math.min(window.innerHeight - 52, rect.top > 90 ? rect.top - 50 : rect.bottom + 10));
-  const left = Math.max(12, Math.min(window.innerWidth - 340, rect.left + rect.width / 2 - 150));
-  return { top, left };
-}
-
-
-function NoteEditor({ annotation, rect, onClose, onSave, onDelete }: {
-  annotation: Annotation;
-  rect: DOMRect;
-  onClose: () => void;
-  onSave: (patch: { color?: string; note?: string }) => Promise<void>;
-  onDelete: () => Promise<void>;
-}) {
-  const draftKey = `omareader:passage-draft:${annotation.book_id}:${annotation.id}`;
-  const [note, setNote] = useState(() => {
-    try { return localStorage.getItem(draftKey) ?? annotation.note; } catch { return annotation.note; }
-  });
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const changeNote = (value: string) => {
-    setNote(value);
-    try { localStorage.setItem(draftKey, value); } catch { setError('Draft could not be stored locally. Save before closing.'); }
-  };
-  const box = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    box.current?.focus();
-  }, []);
-  const close = async () => {
-    if (saving) return;
-    setSaving(true);
-    setError('');
-    try {
-      if (note !== annotation.note) await onSave({ note });
-      try { localStorage.removeItem(draftKey); } catch { /* the server has saved it */ }
-      onClose();
-    } catch (error) {
-      setError(`Save failed: ${(error as Error).message}. Your draft is kept here.`);
-    } finally { setSaving(false); }
-  };
-  const top = Math.max(60, Math.min(window.innerHeight - 270, rect.bottom + 10));
-  const left = Math.max(14, Math.min(window.innerWidth - 400, rect.left - 40));
+function Scrubber({ ratio, onSeek }: { ratio: number; onSeek: (ratio: number) => void }) {
+  const [scrub, setScrub] = useState<number | null>(null);
+  const value = scrub ?? ratio;
+  const commit = () => { if (scrub !== null) { onSeek(scrub); setScrub(null); } };
   return (
-    <div className="note-editor" style={{ top, left }}>
-      <blockquote>{annotation.quote}</blockquote>
-      <textarea
-        ref={box}
-        value={note}
-        placeholder="Write a note…"
-        disabled={saving}
-        onChange={(event) => changeNote(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void close();
-          if (event.key === 'Escape') {
-            event.stopPropagation();
-            onClose();
-          }
-        }}
-      />
-      {error && <p className="error" role="status">{error}</p>}
-      <footer>
-        {COLORS.map((color) => (
-          <button key={color} className={`swatch ${color} ${annotation.color === color ? 'on' : ''}`} title={color} onClick={() => void onSave({ color }).catch(failure)} />
-        ))}
-        <span />
-        <button className="icon" title="Remove" disabled={saving} onClick={() => { if (window.confirm('Delete this annotation and its note?')) void onDelete().then(() => localStorage.removeItem(draftKey)).catch(failure); }}><Trash2 size={15} /></button>
-        <button className="tab" disabled={saving} onClick={onClose}>Cancel</button>
-        <button className="solid" disabled={saving} onClick={() => void close()}>{saving ? 'saving…' : 'save'}</button>
-      </footer>
-    </div>
+    <input className="scrubber" type="range" aria-label="Reading position" aria-valuetext={`${Math.round(value * 100)} percent`}
+      min={0} max={10000} value={Math.round(value * 10000)} style={{ '--at': `${value * 100}%` } as React.CSSProperties}
+      onChange={(e) => setScrub(Number(e.target.value) / 10000)} onPointerUp={commit} onKeyUp={commit} onBlur={commit} />
   );
 }
+
+function endOf(annotation: Annotation) {
+  try {
+    const anchor = JSON.parse(annotation.anchor);
+    return anchor.kind === 'text' ? anchor.endBlock : annotation.block;
+  } catch {
+    return annotation.block;
+  }
+}
+
+function barPosition(rect: DOMRect) {
+  const width = 470;
+  // Below the passage, as in a margin note; above only when there is no room underneath.
+  const below = rect.bottom + 80 < window.innerHeight;
+  const top = Math.max(70, below ? rect.bottom + 14 : rect.top - 66);
+  const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left + rect.width / 2 - width / 2));
+  // The pointer aims at the middle of the passage, wherever the bar had to sit.
+  const caret = Math.max(22, Math.min(width - 22, rect.left + rect.width / 2 - left));
+  return { below, style: { top, left, '--caret': `${caret}px` } as React.CSSProperties };
+}
+

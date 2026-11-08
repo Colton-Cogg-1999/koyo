@@ -1,5 +1,5 @@
 //! Uses the reader's own subscription by running the official CLIs they are already logged
-//! in to. OmaReader never reads or stores a credential. Book text is untrusted input, so
+//! in to. Kōyō never reads or stores a credential. Book text is untrusted input, so
 //! both providers run with every tool disabled, in an empty working directory.
 
 pub mod claude;

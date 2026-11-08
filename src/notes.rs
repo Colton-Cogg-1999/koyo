@@ -1,5 +1,5 @@
 //! Notes live in SQLite and are mirrored as Markdown after every change, so they stay
-//! readable and portable even without OmaReader.
+//! readable and portable even without Kōyō.
 
 use crate::config::Paths;
 use crate::db::Db;
@@ -35,7 +35,7 @@ pub fn book_markdown(db: &Db, book: &str) -> Result<(String, String)> {
     let (title, author): (String, String) =
         conn.query_row("SELECT title,author FROM books WHERE id=?1", [book], |r| Ok((r.get(0)?, r.get(1)?)))?;
     let chapters = retrieval::chapters(&conn, book)?;
-    let mut md = format!("---\ntitle: {}\nauthor: {}\nsource: OmaReader\n---\n\n# {title}\n\n", yaml(&title), yaml(&author));
+    let mut md = format!("---\ntitle: {}\nauthor: {}\nsource: Kōyō\n---\n\n# {title}\n\n", yaml(&title), yaml(&author));
 
     let mut stmt = conn.prepare(
         "SELECT kind,color,block,page,quote,note FROM annotations WHERE book_id=?1 ORDER BY page,block,created_at",

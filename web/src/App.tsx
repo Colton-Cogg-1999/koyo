@@ -1,88 +1,55 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Search, X, Pause } from 'lucide-react';
-import { CommandPalette } from './CommandPalette';
-import { editingTarget } from './preferences';
-import { player, usePlayer } from './audio';
 import { api, onServerEvent } from './api';
-import { AudioPane, WORKSPACES } from './LeftPanes';
+import { Library } from './Library';
+import { editingTarget } from './preferences';
 import { Reader } from './reader/Reader';
-import { navigate, useRoute } from './route';
-import type { Book, Collection, SearchHit } from './types';
-import { failure, toast, Toasts, useAsync } from './ui';
-import { AskBook, Library } from './views/Library';
-import { Annotations, Audiobooks, Notebook, Settings } from './views/Others';
+import { useRoute } from './route';
+import { toggleTheme } from './theme';
+import type { Book } from './types';
+import { failure, Mark, toast, Toasts, useAsync } from './ui';
 
+const FORMATS = 'epub · pdf · md · html · docx · fb2 · txt';
+
+/** Two places only: the shelf and the page. */
 export function App() {
   const route = useRoute();
-  const [palette, setPalette] = useState(false);
-  const audio = usePlayer();
   const [books, reloadBooks] = useAsync<Book[]>(() => api.books(), []);
-  const [collections, reloadCollections] = useAsync<Collection[]>(() => api.collections(), []);
   const [dragging, setDragging] = useState(false);
-  const [focus, setFocus] = useState(false);
-  const [search, setSearch] = useState<{ book?: string } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const depth = useRef(0);
-  const lastRead = useRef<string | null>(null);
-  useEffect(() => { if (route.view === 'read') lastRead.current = route.id; }, [route]);
-
-  const refresh = useCallback(() => {
-    reloadBooks();
-    reloadCollections();
-  }, []);
 
   useEffect(() => onServerEvent((event) => {
-    if (event.type === 'book') {
-      refresh();
-      if (event.status === 'failed') toast('that file could not be opened; see the library', 'error');
-    }
-  }), [refresh]);
-
-  const latest = books?.filter((b) => b.status === 'ready' && b.read_at).sort((a, b) => (b.read_at ?? 0) - (a.read_at ?? 0))[0];
-
-  const goWorkspace = useCallback((path: string) => {
-    if (path) navigate(path);
-    else if (lastRead.current ?? latest?.id) navigate(`read/${lastRead.current ?? latest!.id}`);
-  }, [latest]);
+    if (event.type !== 'book') return;
+    reloadBooks();
+    if (event.status === 'failed') toast('That file could not be opened. Details are on its card.', 'error');
+  }), []);
 
   useEffect(() => {
-    const open = (event: Event) => setSearch({ book: (event as CustomEvent).detail?.book });
     const onKey = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') { event.preventDefault(); setPalette((v) => !v); return; }
-      if (editingTarget(event.target)) return;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); setSearch({ book: route.view === 'read' ? route.id : undefined }); return; }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') { event.preventDefault(); navigate('library'); return; }
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
-      if (event.key === '/') {
-        event.preventDefault();
-        setSearch({ book: route.view === 'read' ? route.id : undefined });
-      }
-      const space = WORKSPACES.find((w) => w.key === event.key);
-      if (space) goWorkspace(space.path);
+      if (editingTarget(event.target) || event.ctrlKey || event.metaKey || event.altKey) return;
+      if (event.key === 'd') toggleTheme();
     };
-    window.addEventListener('oma-search', open);
     window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('oma-search', open);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [route, goWorkspace]);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
-  const importFiles = async (files: FileList | File[]) => {
+  const importFiles = useCallback(async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       try {
         const result = await api.upload(file);
-        toast(result.duplicate ? `${file.name}: already in library` : `importing ${file.name}`);
-        refresh();
+        toast(result.duplicate ? `${file.name} is already on the shelf` : `Adding ${file.name}`);
+        reloadBooks();
       } catch (error) {
         failure(error);
       }
     }
-  };
+  }, []);
+
+  const openPicker = useCallback(() => fileInput.current?.click(), []);
 
   return (
     <div
-      className={`app ${focus ? 'zen' : ''}`}
+      className="app"
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes('Files')) return;
         depth.current++;
@@ -102,24 +69,9 @@ export function App() {
         void importFiles(event.dataTransfer.files);
       }}
     >
-      {!focus && (
-        <header className="app-nav">
-          <button className="app-brand" onClick={() => navigate('library')}>OMA<span>READER</span></button>
-          <nav className="workspaces" aria-label="Workspaces">
-            {WORKSPACES.map((space) => <button key={space.key} className={route.view === space.match ? 'on' : ''} aria-current={route.view === space.match ? 'page' : undefined} title={`${space.label} (${space.key})`} onClick={() => goWorkspace(space.path)}>{space.label}</button>)}
-          </nav>
-          {audio.playing && route.view !== 'audiobooks' && <button className="ghost audio-indicator" title="Pause narration" onClick={() => player.toggle()}><Pause size={14} /> Audio playing</button>}
-        </header>
-      )}
-      <main className="main">
-        {route.view === 'library' && <Library books={books ?? []} collections={collections ?? []} filter={route} onChange={refresh} onImport={() => fileInput.current?.click()} />}
-        {route.view === 'ask' && <AskBook key={route.id} id={route.id} />}
-        {route.view === 'read' && <Reader key={route.id} id={route.id} startBlock={route.block} startPage={route.page} focus={focus} setFocus={setFocus} />}
-        {route.view === 'annotations' && <Annotations />}
-        {route.view === 'audiobooks' && <div className="audio-workspace"><Audiobooks /><AudioPane fallbackBookId={latest?.id} /></div>}
-        {route.view === 'notebook' && <Notebook />}
-        {route.view === 'settings' && <Settings />}
-      </main>
+      {route.view === 'read'
+        ? <Reader key={route.id} id={route.id} startBlock={route.block} startPage={route.page} />
+        : <Library books={books} onImport={openPicker} onChange={reloadBooks} formats={FORMATS} />}
       <input
         ref={fileInput}
         type="file"
@@ -133,61 +85,12 @@ export function App() {
       />
       {dragging && (
         <div className="drop-veil">
-          <strong>Drop books to import</strong>
-          <span>epub pdf md docx html fb2 txt</span>
+          <Mark size={88} />
+          <strong>Drop to add to your shelf</strong>
+          <span>{FORMATS}</span>
         </div>
       )}
-      {search && <SearchSheet scope={search.book} onClose={() => setSearch(null)} />}
-      {palette && <CommandPalette reading={route.view === 'read'} onClose={() => setPalette(false)} onSearch={() => setSearch({ book: route.view === 'read' ? route.id : undefined })} onImport={() => fileInput.current?.click()} />}
       <Toasts />
     </div>
   );
-}
-
-function SearchSheet({ scope, onClose }: { scope?: string; onClose: () => void }) {
-  const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<SearchHit[]>([]);
-  const [wide, setWide] = useState(!scope);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (query.trim().length < 2) return setHits([]);
-      api.search(query, wide ? undefined : scope).then(setHits).catch(failure);
-    }, 140);
-    return () => window.clearTimeout(timer);
-  }, [query, wide, scope]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="search-veil" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="search-sheet">
-        <header>
-          <Search size={16} />
-          <input autoFocus aria-label="Search" placeholder={wide ? 'Search all books' : 'Search this book'} value={query} onChange={(event) => setQuery(event.target.value)} />
-          {scope && <button className="tab" onClick={() => setWide(!wide)}>{wide ? 'this book' : 'all books'}</button>}
-          <button className="icon" title="Close" onClick={onClose}><X size={15} /></button>
-        </header>
-        <div className="hits">
-          {hits.map((hit) => (
-            <button key={`${hit.book_id}-${hit.block}`} onClick={() => { navigate(`read/${hit.book_id}?b=${hit.block}`); onClose(); }}>
-              {wide && <small>{hit.title}</small>}
-              <span>{snippet(hit.snippet)}</span>
-              {hit.page > 0 && <em>p.{hit.page}</em>}
-            </button>
-          ))}
-          {query.length > 1 && !hits.length && <p className="hint">no matches.</p>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** FTS marks matches with control characters, which become real elements here. */
-function snippet(text: string) {
-  return text.split(/\u0002|\u0003/).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
 }

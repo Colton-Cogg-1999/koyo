@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=OmaReader
-Comment=Read books, keep notes, and listen offline
+Name=Kōyō
+Comment=Read books, keep notes, and ask questions of the page
 Exec=omareader
 Icon=omareader
 Terminal=false
 Categories=Office;Viewer;
-StartupWMClass=OmaReader
+StartupWMClass=Koyo

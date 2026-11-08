@@ -2,7 +2,7 @@
 name = "omareader"
 version = "0.1.0"
 edition = "2021"
-description = "A local-first e-reader with notes, AI questions through your own CLI subscription, and offline audiobooks."
+description = "Kōyō: a quiet, local-first e-reader with notes and questions answered through your own AI CLI."
 license = "MIT"
 
 [lib]
@@ -12,6 +12,12 @@ path = "src/lib.rs"
 [[bin]]
 name = "omareader"
 path = "src/main.rs"
+
+[features]
+default = []
+# Offline Kokoro narration. Off by default: it links the ONNX runtime, which roughly
+# triples the binary, and the reader is focused on reading, notes and questions for now.
+narration = ["dep:sherpa-onnx"]
 
 [dependencies]
 anyhow = "1"
@@ -37,7 +43,7 @@ serde_json = "1"
 sha2 = "0.10"
 # 1.13 is the last line with the built-in espeak-ng fallback. 2.x silently skips every
 # word missing from the lexicon, numbers included, which would put holes in audiobooks.
-sherpa-onnx = "=1.13.8"
+sherpa-onnx = { version = "=1.13.8", optional = true }
 tar = "0.4"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
