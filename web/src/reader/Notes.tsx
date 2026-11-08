@@ -19,10 +19,14 @@ export function Notes({ mode, book, annotations, focus, go, onUpdate, onDelete }
   onUpdate: (id: string, patch: { color?: Color; note?: string }) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  // Once a note is listed it stays listed while the tab is open, so clearing its text to
+  // rewrite it doesn't make the card vanish mid-edit.
+  const shown = useRef(new Set<string>());
   const groups = useMemo(() => {
-    const list = annotations.filter((a) => a.kind === 'highlight' && (mode === 'highlights' || a.note || a.id === focus?.id || stored(`note-draft:${a.id}`, ''))).sort((a, b) => a.block - b.block || a.created_at - b.created_at);
+    const list = annotations.filter((a) => a.kind === 'highlight' && (mode === 'highlights' || a.note || a.id === focus?.id || shown.current.has(a.id) || stored(`note-draft:${a.id}`, ''))).sort((a, b) => a.block - b.block || a.created_at - b.created_at);
     const map = new Map<string, Annotation[]>();
     for (const item of list) {
+      shown.current.add(item.id);
       const chapter = book.chapters.findLast((c) => c.start <= item.block)?.title ?? '';
       map.set(chapter, [...(map.get(chapter) ?? []), item]);
     }

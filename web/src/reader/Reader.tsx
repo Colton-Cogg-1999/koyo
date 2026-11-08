@@ -164,7 +164,7 @@ export function Reader({ id, startBlock, startPage }: { id: string; startBlock: 
     return () => document.removeEventListener('pointerdown', press);
   }, [hit, picked]);
 
-    const chapters = book?.chapters ?? [];
+  const chapters = book?.chapters ?? [];
   const chapterIndex = chapters.findLastIndex((c) => c.start <= location.block);
 
   useEffect(() => {
@@ -252,7 +252,7 @@ export function Reader({ id, startBlock, startPage }: { id: string; startBlock: 
           <aside className={`panel panel-${panel}`} hidden={!panel} aria-label={panel === 'contents' ? 'Contents' : 'Reading companion'}>
             {panel === 'contents' && <Contents book={book} location={location} go={go} searchNonce={searchNonce} onClose={() => setPanel(null)} />}
             {panel && panel !== 'contents' && <Tabs tab={panel} onTab={setPanel} onClose={() => setPanel(null)} />}
-            {(panel === 'notes' || panel === 'highlights') && <Notes mode={panel} book={book} annotations={list} focus={focusNote} go={go} onUpdate={updateAnnotation} onDelete={deleteAnnotation} />}
+            {(panel === 'notes' || panel === 'highlights') && <Notes key={panel} mode={panel} book={book} annotations={list} focus={focusNote} go={go} onUpdate={updateAnnotation} onDelete={deleteAnnotation} />}
             {/* Ask stays mounted once opened, so a streaming answer or a draft survives switching tabs. */}
             {askOpened && <div className="tab-body" hidden={panel !== 'ask'}><Ask book={book} location={location} seed={askSeed} go={(block) => go(block)} onSaved={reloadAnnotations} /></div>}
           </aside>
