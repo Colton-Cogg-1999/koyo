@@ -378,12 +378,17 @@ test('clicking a highlight recolours or removes it in place', async () => {
   await select(3);
   await page.click('.selection-bar .dot.green');
   await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3 && a.color === 'green'));
+  // The server can have it before this page has painted it; click only what is on screen.
+  const painted = (color) => eventually(() => page.evaluate((c) => (CSS.highlights.get(`oma-${c}`)?.size ?? 0) > 0, color));
+  await painted('green');
   const point = await page.locator('[data-b="3"]').evaluate((element) => { const r = document.createRange(); r.selectNodeContents(element); const box = r.getClientRects()[0]; return { x: box.left + 10, y: box.top + box.height / 2 }; });
   await page.mouse.click(point.x, point.y);
   await page.waitForSelector('.selection-bar .dot.green.on');
   await page.click('.selection-bar .dot.pink');
   await eventually(async () => (await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3 && a.color === 'pink'));
+  await painted('pink');
   await page.mouse.click(point.x, point.y);
+  await page.waitForSelector('.selection-bar .dot.pink.on');
   await page.click('.selection-bar [aria-label="Remove highlight"]');
   await eventually(async () => !(await api(`/api/annotations?book=${epub}`)).some((a) => a.block === 3));
 });
